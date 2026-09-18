@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TrainWhisper</title>
+  <meta name="description" content="Condition monitoring for rail vehicle subsystems — drop in telemetry, get a localised maintenance action.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚈</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="page-head">
+    <h1><span aria-hidden="true">🚈</span> TrainWhisper</h1>
+    <p class="lede">Condition monitoring for rail vehicle subsystems — drop in telemetry, get a localised maintenance action.</p>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" id="tab-analyse" aria-controls="panel-analyse" aria-selected="true">Analyse</button>
+    <button role="tab" id="tab-bench" aria-controls="panel-bench" aria-selected="false" tabindex="-1">Model benchmark</button>
+    <button role="tab" id="tab-about" aria-controls="panel-about" aria-selected="false" tabindex="-1">About</button>
+  </nav>
+
+  <main>
+    <section id="panel-analyse" role="tabpanel" aria-labelledby="tab-analyse">
+      <fieldset class="subsystems">
+        <legend>Subsystem</legend>
+        <label><input type="radio" name="kind" value="auto" checked> Auto-detect</label>
+        <label><input type="radio" name="kind" value="Door"> Door</label>
+        <label><input type="radio" name="kind" value="ACV"> ACV</label>
+        <label><input type="radio" name="kind" value="Rail corrugation"> Rail corrugation</label>
+        <label><input type="radio" name="kind" value="SHM"> SHM</label>
+      </fieldset>
+
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="file-input" accept=".csv,.xlsx,.xls" multiple>
+        <strong>Drop telemetry files here</strong>
+        <span>or click to browse — CSV or Excel. Files never leave your browser.</span>
+      </label>
+
+      <div class="samples">
+        <span>Or load a sample:</span>
+        <button type="button" data-sample="door">Door — continuous stream</button>
+        <button type="button" data-sample="acv">ACV — 8-car workbook</button>
+        <button type="button" data-sample="rail">Rail — single recording</button>
+        <button type="button" data-sample="shm">SHM — stress segment</button>
+      </div>
+
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+      <div id="results"></div>
+    </section>
+
+    <section id="panel-bench" role="tabpanel" aria-labelledby="tab-bench" hidden>
+      <h2>Which model won, and how we know</h2>
+      <div class="table-wrap"><table id="bench-table"></table></div>
+      <p class="caption">
+        Every score is out-of-sample. Door uses a chronological split because the segments come from one
+        continuous stream; Rail reports nested CV because the class priors are themselves tuned; SHM uses
+        leave-one-out on 64 files. Two rail approaches that theory favoured — wavelength normalisation and
+        per-axle-box modelling — were tested and rejected on the evidence.
+      </p>
+    </section>
+
+    <section id="panel-about" role="tabpanel" aria-labelledby="tab-about" hidden class="prose">
+      <p><strong>What this is.</strong> One app across four rail-vehicle subsystems: saloon doors, air
+        conditioning, rail corrugation and structural fatigue.</p>
+      <p><strong>Design principles</strong></p>
+      <ul>
+        <li><em>Localise, don't just detect.</em> Every output names the asset — which cycle, which car, which
+          rail side, which measurement point.</li>
+        <li><em>The fleet is the baseline.</em> Where siblings exist (cars on a train, rails on a bogie), they are
+          compared against each other so ambient conditions cancel out.</li>
+        <li><em>Physics before black boxes.</em> Door resistance shows up in motor current; fatigue damage follows
+          Miner's rule. Fitting known physics beats deep models on datasets this small, and is far easier to
+          defend to an engineer.</li>
+        <li><em>Schema-agnostic loading.</em> Column sets differ between files and fleets, so parsers read each
+          file's own headers.</li>
+      </ul>
+      <p><strong>Where it runs.</strong> Everything runs in your browser. The trained models ship as static
+        JSON and are evaluated client-side, so telemetry files are never uploaded — a 17&nbsp;MB rail recording
+        is analysed locally in about a second.</p>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+</body>
+</html>
