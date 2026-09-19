@@ -257,10 +257,56 @@ def _resolve(name, base):
     raise FileNotFoundError(f"{name} not found under {base}")
 
 
-def load_acv(case="acv_test_case.xlsx"):
-    """One ACV case file (30 s telemetry for all 8 cars)."""
+# Toggle: whether `load_acv` scrubs literal-0 readings in the ACV temperature
+# and setpoint columns to NaN at load time. A handful of rows in several case
+# files (and, in cases 05/06, ~86-90% of the Heating setpoint column) carry an
+# exact 0 rather than a blank -- physically implausible for a cabin/outdoor
+# temperature or an active setpoint, so it reads as a sensor/telemetry glitch
+# rather than a real 0C reading. Whether that glitch itself correlates with
+# the leaking car is an open question (it does in 3 of the 3 standard-schema
+# labelled cases checked, but not in the Test case, where it's spread across
+# several cars) -- scrubbing it to NaN throws that signal away along with the
+# noise, which is exactly why this is a toggle and not just a fix: flip it to
+# False to get the raw 0s back for that investigation.
+ACV_TREAT_ZERO_AS_MISSING = True
+
+# Raw column-name suffixes (after "Car NN - ") this toggle applies to -- the
+# numeric temperature/setpoint parameters, under every name they appear as
+# across the case files (see acv_features.PARAM_ALIASES for where these
+# get folded onto one canonical name downstream).
+ACV_ZERO_INVALID_PARAMS = {
+    "Indoor Average Temperature",
+    "Outdoor Average Temperature",
+    "Outside Temperature Sensor Reading",
+    "ACV Control Temperature (Cooling)",
+    "ACV Control Temperature (Heating)",
+    "Passenger Cabin Temperature Detected Value",
+    "Fresh Air Temperature Detected Value",
+    "Target Temperature Value",
+}
+
+
+def load_acv(case="acv_test_case.xlsx", treat_zero_as_missing=None):
+    """One ACV case file (30 s telemetry for all 8 cars).
+
+    `treat_zero_as_missing` defaults to `ACV_TREAT_ZERO_AS_MISSING`; pass it
+    explicitly to override the module-level toggle for one call without
+    flipping it globally.
+    """
+    if treat_zero_as_missing is None:
+        treat_zero_as_missing = ACV_TREAT_ZERO_AS_MISSING
+
     df = pd.read_excel(_resolve(case, ACV_DIR))
     df["Time"] = pd.to_datetime(df["Time"])
+
+    if treat_zero_as_missing:
+        for col in df.columns:
+            if not (col.startswith("Car ") and " - " in col):
+                continue
+            if col.split(" - ", 1)[1] not in ACV_ZERO_INVALID_PARAMS:
+                continue
+            df[col] = df[col].mask(df[col] == 0)
+
     return df
 
 
