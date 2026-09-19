@@ -44,10 +44,13 @@ different copy of the training data.
 """
 from __future__ import annotations
 
+import os
+
+import joblib
 import numpy as np
 import pandas as pd
 
-from common import data_path
+from common import MODEL_DIR, data_path
 
 DATETIME_FORMAT = "%Y-%m-%d-%H-%M-%S-%f"
 STATUS_NORMAL = "Normal"
@@ -68,6 +71,7 @@ STATISTIC_GRID = ["top05_z2", "scan_p90", "scan_p95", "scan_p99"]
 
 DEFAULT_TRAIN = data_path("Door", "Train.csv")
 DEFAULT_TRAIN_ANSWER = data_path("Door", "Train_Segments_Answer.csv")
+MODEL_PATH = os.path.join(MODEL_DIR, "door_model.joblib")
 
 
 # ---- loading & segmentation -------------------------------------------------
@@ -399,10 +403,14 @@ _model = None
 
 
 def get_model() -> tuple[dict, dict, str]:
-    """Fit (and cache) templates + thresholds from the labelled training stream."""
+    """Load the fitted templates/thresholds, else fit from the labelled stream."""
     global _model
     if _model is None:
-        _model = fit(str(DEFAULT_TRAIN), str(DEFAULT_TRAIN_ANSWER))
+        if os.path.exists(MODEL_PATH):
+            bundle = joblib.load(MODEL_PATH)
+            _model = (bundle["templates"], bundle["thresholds"], bundle["statistic"])
+        else:
+            _model = fit(str(DEFAULT_TRAIN), str(DEFAULT_TRAIN_ANSWER))
     return _model
 
 
@@ -469,17 +477,20 @@ def predict_with_traces(path_or_buffer):
 
 
 def train(verbose: bool = True) -> dict:
-    """Fit and report held-out (validation split) IoU-weighted F1."""
+    """Fit from the labelled stream, save the model, and report val IoU-F1."""
     from evaluate import door_iou_f1
 
-    templates, thresholds, statistic = get_model()
+    templates, thresholds, statistic = fit(str(DEFAULT_TRAIN), str(DEFAULT_TRAIN_ANSWER))
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    joblib.dump({"templates": templates, "thresholds": thresholds, "statistic": statistic}, MODEL_PATH)
+
     answer = pd.read_csv(DEFAULT_TRAIN_ANSWER)
     val = np.asarray(split_cycles(answer)["val"]) - 1
     pred = predict_stream(str(DEFAULT_TRAIN), templates, thresholds, statistic)
     score = float(door_iou_f1(pred.iloc[val].reset_index(drop=True),
                               answer.iloc[val].reset_index(drop=True)))
     if verbose:
-        print(f"[door] validation-split IoU-weighted F1: {score:.4f}")
+        print(f"[door] validation-split IoU-weighted F1: {score:.4f} -> {MODEL_PATH}")
     return {"holdout_macro_f1": score}
 
 
