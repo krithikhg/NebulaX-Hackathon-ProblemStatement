@@ -1,11 +1,11 @@
 // One view per subsystem. Each takes the worker payload plus { openPanel } and returns:
-//   { level, headline, tile: { value, caption }, mini: Node, stats: [], main: Node, actions: [],
+//   { level, headline, tile: { value, caption }, mini: Node, stats: [], main: Node,
 //     records: Node, signals: Node[], method, csv: { filename, text }, print: { columns, rows, note } }
 // app.js lays these out identically for every subsystem.
 import { bars, lines, segmentedLine } from "./charts.js";
 import { pyFloat, remainingLife, toCsv } from "./util.js";
 import {
-  card, certainty, certaintyCell, clock, day, excelDate, fmt, h, int, legend, levelChip, segmented, signed, stat, table, titled,
+  LEVELS, card, certainty, certaintyCell, clock, day, excelDate, fmt, h, int, legend, levelChip, segmented, signed, stat, table, titled,
 } from "./ui.js";
 
 const NORMAL = "Normal";
@@ -46,7 +46,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
   const badRows = rows.filter((r) => r.bad);
   const okRows = rows.filter((r) => !r.bad);
   const bad = badRows.length;
-  const level = bad === 0 ? "ok" : bad >= 5 ? "act" : "plan";
+  const level = bad ? "fault" : "ok";
   const meanBad = bad ? mean(badRows.map((r) => r.mean_current_mA)) : null;
   const meanOk = okRows.length ? mean(okRows.map((r) => r.mean_current_mA)) : null;
   const effort = meanBad && meanOk ? meanBad / meanOk - 1 : null;
@@ -63,7 +63,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
     if (ref) series.push({ name: `Median normal (cycle ${ref.i + 1})`, color: "var(--neutral-bar)", dash: "5 4", points: toSeries(ref) });
     openPanel({
       title: `Cycle ${i + 1}`,
-      chip: levelChip(r.bad ? "act" : "ok", r.prediction),
+      chip: levelChip(r.bad ? "fault" : "ok", r.prediction),
       subtitle: `${r.operation || "Cycle"} · ${day(r.t0)} ${clock(r.t0)}`,
       body: [
         h("div", { class: "stats-2" },
@@ -98,7 +98,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
     { key: "t0", label: "Start", fmt: (v) => clock(v) },
     { key: "operation", label: "Direction", fmt: (v) => v || "-" },
     { key: "duration_s", label: "Duration (s)", num: true, fmt: (v) => v.toFixed(1) },
-    { key: "prediction", label: "Status", fmt: (v) => levelChip(v === NORMAL ? "ok" : "act", v) },
+    { key: "prediction", label: "Status", fmt: (v) => levelChip(v === NORMAL ? "ok" : "fault", v) },
     { key: "mean_current_mA", label: "Mean current (mA)", num: true, fmt: (v) => int(v) },
   ];
   const records = filterable(rows, (r) => r.bad, cols, { maxHeight: 520, onOpen: (r) => open(r.i), rowClass: (r) => (r.bad ? "row-bad" : ""), caption: "Door cycles" });
@@ -126,12 +126,6 @@ export function doorView({ name, result, cycles }, { openPanel }) {
       stat({ label: "Current increase", value: effort !== null ? `${signed(effort * 100, 0)}%` : "-", caption: "abnormal vs normal" }),
     ],
     main,
-    actions: bad ? [
-      "Inspect slide rail and guides for foreign objects",
-      "Check rubber seal strip for jamming",
-      "Check door leaf for deformation",
-      "Re-run on a new stream after repair",
-    ] : ["No action required"],
     records, signals,
     method: "Motion-state segmentation, then a per-operation median current template from normal cycles; a cycle is scored by its largest sustained excursion against the normal IQR band.",
     csv: { filename: "door_predictions.csv", text: toCsv(result, ["start_time", "end_time", "prediction"]) },
@@ -164,7 +158,6 @@ export function acvView({ name, ranked, samples, train, window: win }, { openPan
   const last = ranked[ranked.length - 1];
   const spread = top.score - last.score;
   const lead = spread > 0 && second ? (top.score - second.score) / spread : 1;
-  const clear = lead >= 0.3;
   const rankOf = new Map(ranked.map((r, i) => [r.car, i + 1]));
   const order = ranked.map((r) => r.car);
   const t0 = win ? excelDate(win[0]) : null;
@@ -176,7 +169,7 @@ export function acvView({ name, ranked, samples, train, window: win }, { openPan
     const rank = rankOf.get(car);
     openPanel({
       title: `Car ${car}`,
-      chip: rank === 1 ? levelChip("plan", "Suspected leak") : levelChip(rank <= 3 ? "watch" : "ok", `Rank ${rank}`),
+      chip: rank === 1 ? levelChip("fault", "Suspected leak") : h("span", { class: "chip sev-neutral" }, `Rank ${rank}`),
       subtitle: `Rank ${rank} of ${ranked.length}`,
       body: [
         h("div", { class: "stats-2" },
@@ -223,28 +216,22 @@ export function acvView({ name, ranked, samples, train, window: win }, { openPan
     h("p", { class: "caption" }, "Submission row: ", h("code", {}, row.ranked_cars)))];
 
   return {
-    level: "plan",
+    level: "fault",
     headline: `Car ${top.car}: suspected refrigerant leak`,
     tile: { value: `Car ${top.car}`, caption: "suspected leak" },
     mini: h("div", { class: "mini-train" }, cars.map((c) => h("i", { class: `m-${tag(rankOf.get(c.car))}` }))),
     stats: [
       stat({ label: "Suspected car", value: `Car ${top.car}`, caption: `${signed(top.cabin_temp_dev_C)} °C vs median` }),
-      stat({ label: "Next to inspect", value: order.slice(1, 3).map((c) => `Car ${c}`).join(", "), caption: "if the first is clear" }),
-      stat({ label: "Separation", value: clear ? "Clear" : "Close", chip: levelChip(clear ? "ok" : "watch", pct(lead)), tip: "Lead of rank 1 over rank 2, as a share of the spread between the first and last car. Under 30% counts as close." }),
+      stat({ label: "Next most likely", value: order.slice(1, 3).map((c) => `Car ${c}`).join(", "), caption: "ranks 2 and 3" }),
+      stat({ label: "Separation", value: pct(lead), caption: "rank 1 lead over rank 2", tip: "Lead of rank 1 over rank 2, as a share of the score spread between the first and last car. Higher means the top car stands out more." }),
       stat({ label: "Samples", value: samples ? int(samples) : "-", caption: [train ? `Train ${train}` : null, t0 && t1 ? `${day(t0)} to ${day(t1)}` : null].filter(Boolean).join(" · ") || null }),
     ],
     main,
-    actions: [
-      `Pressure-test refrigerant circuit, Car ${top.car}`,
-      `Check joints and valves for oil traces, Car ${top.car}`,
-      "Recharge and re-run after repair",
-      second ? `If Car ${top.car} is clear, inspect Car ${order[1]}` : null,
-    ].filter(Boolean),
     records, signals,
     method: "Each car's cabin temperature is compared with the median of all cars at every timestamp; cars are ranked by mean deviation. Low-side pressure is added when every car logs it.",
     csv: { filename: "acv_predictions.csv", text: toCsv([row], ["file_id", "ranked_cars"]) },
     print: {
-      note: "Inspection order",
+      note: "Cars by leak likelihood",
       columns: ["Rank", "Car", "Cabin temp vs median"],
       rows: ranked.map((r, i) => [i + 1, `Car ${r.car}`, Number.isFinite(r.cabin_temp_dev_C) ? `${signed(r.cabin_temp_dev_C)} °C` : "-"]),
     },
@@ -288,9 +275,8 @@ export function railView({ result, bands, bandLabels }, { openPanel }) {
   const still = rows.filter((r) => r.stationary);
   const s1 = faults.filter((r) => r.prediction === "Side I").length;
   const s2 = faults.filter((r) => r.prediction === "Side II").length;
-  const level = faults.length ? "plan" : still.length ? "watch" : "ok";
-  const unsure = faults.filter((r) => certainty(r.confidence).word === "Low");
-  const statusChip = (r) => (r.stationary ? levelChip("watch", "Not assessed") : r.prediction === NORMAL ? levelChip("ok", NORMAL) : levelChip("plan", r.prediction));
+  const level = faults.length ? "fault" : still.length ? "na" : "ok";
+  const statusChip = (r) => (r.stationary ? levelChip("na") : r.prediction === NORMAL ? levelChip("ok", NORMAL) : levelChip("fault", r.prediction));
 
   const open = (i) => {
     const r = rows[i];
@@ -322,7 +308,7 @@ export function railView({ result, bands, bandLabels }, { openPanel }) {
         type: "button", class: `rec rec-${r.stationary ? "na" : r.prediction === NORMAL ? "ok" : "bad"}`,
         onclick: () => open(r.i), "data-tip": `${r.file_id}: ${r.status}`, "data-tip-sub": r.stationary ? "speed < 0.5 m/s" : `${r.kmh.toFixed(0)} km/h · ${certainty(r.confidence).word} confidence`, "aria-label": `${r.file_id}, ${r.status}`,
       }, h("span", {}, r.file_id.replace(/\.csv$/i, "")), r.prediction !== NORMAL && !r.stationary ? h("b", {}, r.prediction === "Side I" ? "I" : "II") : null))),
-      legend([["Corrugation (side shown)", "sw-plan"], ["Normal", "sw-ok"], ["Not assessed", "sw-watch"]]));
+      legend([["Corrugation (side shown)", "sw-act"], ["Normal", "sw-ok"], ["Not assessed", "sw-na"]]));
   }
 
   const cols = [
@@ -343,16 +329,6 @@ export function railView({ result, bands, bandLabels }, { openPanel }) {
   const signals = [card(h("div", { class: "card-head" }, titled("h3", "Vibration energy per band", "Mean log energy across each side's 32 axle boxes."), select),
     legend([["Side I", "sw-s1"], ["Side II", "sw-s2"]]), spec)];
 
-  const actions = [];
-  if (faults.length) {
-    actions.push("Locate track section from recording timestamp");
-    if (unsure.length) actions.push(`Confirm by track walk (${unsure.length} low-confidence)`);
-    actions.push(`Schedule rail grinding, ${[s1 ? "Side I" : null, s2 ? "Side II" : null].filter(Boolean).join(" and ")}`);
-    actions.push("Re-measure after grinding");
-  }
-  if (still.length) actions.push(`Re-record ${n === 1 ? "this section" : still.length === 1 ? still[0].file_id : `${still.length} stationary recordings`} at speed`);
-  if (!actions.length) actions.push("No action required");
-
   const headline = n === 1
     ? (faults.length ? `Corrugation on ${faults[0].prediction}` : still.length ? "Not assessed: train stationary" : "No corrugation detected")
     : (faults.length ? `Corrugation in ${faults.length} of ${n} recordings` : `No corrugation in ${n - still.length} assessed recordings`);
@@ -367,11 +343,11 @@ export function railView({ result, bands, bandLabels }, { openPanel }) {
       stat({ label: "Speed", value: `${rows[0].kmh.toFixed(0)} km/h`, caption: "from 90-tooth speed sensor" }),
     ] : [
       stat({ label: "Recordings", value: int(n) }),
-      stat({ label: "Side I", value: int(s1), chip: s1 ? levelChip("plan", "corrugation") : null }),
-      stat({ label: "Side II", value: int(s2), chip: s2 ? levelChip("plan", "corrugation") : null }),
+      stat({ label: "Side I", value: int(s1), chip: s1 ? levelChip("fault", "corrugation") : null }),
+      stat({ label: "Side II", value: int(s2), chip: s2 ? levelChip("fault", "corrugation") : null }),
       stat({ label: "Not assessed", value: int(still.length), caption: "speed < 0.5 m/s", tip: "Stationary recordings have no wheel-rail excitation, so they are reported as Normal in the CSV." }),
     ],
-    main, actions, records, signals,
+    main, records, signals,
     method: "Per-channel RMS, peak, kurtosis and 9-band log energy, aggregated per rail side plus Side I − Side II differences; random forest with class priors tuned for macro F1.",
     csv: { filename: "rail_predictions.csv", text: toCsv(result, ["file_id", "prediction"]) },
     print: {
@@ -383,8 +359,8 @@ export function railView({ result, bands, bandLabels }, { openPanel }) {
 }
 
 // ================================================================ SHM ====
-export const SHM_BANDS = [[0.8, "act"], [0.5, "plan"], [0.25, "watch"], [0, "ok"]];
-const shmLevel = (d) => SHM_BANDS.find(([t]) => d >= t)[1];
+// Miner's rule: fatigue failure is expected at D = 1. No other thresholds are assumed.
+const shmLevel = (d) => (d >= 1 ? "fault" : "ok");
 const lifeLeft = (d) => {
   const v = remainingLife(d);
   if (!Number.isFinite(v)) return "-";
@@ -397,11 +373,11 @@ export function shmView({ result, detail, fit }, { openPanel }) {
   const sorted = [...rows].sort((a, b) => b.prediction - a.prediction);
   const worst = sorted[0];
   const level = worst.level;
-  const need = rows.filter((r) => r.level === "act" || r.level === "plan");
-  const watch = rows.filter((r) => r.level === "watch");
+  const failed = rows.filter((r) => r.level === "fault");
+  const median = [...rows].sort((a, b) => a.prediction - b.prediction)[Math.floor((n - 1) / 2)].prediction;
 
   const gauge = (r, big) => h("div", { class: `g-track${big ? " big" : ""}` },
-    h("i", { class: `g-fill sev-${r.level}`, style: `width:${Math.min(100, r.prediction * 100)}%` }));
+    h("i", { class: `g-fill${r.level === "fault" ? " sev-fault" : ""}`, style: `width:${Math.min(100, r.prediction * 100)}%` }));
 
   const open = (i) => {
     const r = rows[i];
@@ -411,7 +387,7 @@ export function shmView({ result, detail, fit }, { openPanel }) {
       subtitle: `D = ${r.prediction.toFixed(4)}`,
       body: [
         gauge(r, true),
-        h("div", { class: "g-ticks", "aria-hidden": "true" }, ["0", "0.25", "0.5", "0.8", "1"].map((t) => h("span", {}, t))),
+        h("div", { class: "g-ticks", "aria-hidden": "true" }, ["0", "0.25", "0.5", "0.75", "1"].map((t) => h("span", {}, t))),
         h("div", { class: "stats-2" },
           stat({ label: "Cumulative damage D", value: r.prediction.toFixed(3) }),
           stat({ label: "Segments to D = 1", value: lifeLeft(r.prediction), tip: "Further segments of the same length and loading before Miner's sum reaches 1." }),
@@ -429,11 +405,11 @@ export function shmView({ result, detail, fit }, { openPanel }) {
     });
   };
 
-  const main = card(titled("h3", "Cumulative damage D", "Bands: below 0.25 Normal, 0.25 to 0.5 Monitor, 0.5 to 0.8 Plan, 0.8 and above Act now. These are team defaults, not an LTA standard."),
+  const main = card(titled("h3", "Cumulative damage D", "Miner's cumulative damage per segment. Fatigue failure is expected at D = 1; bars are drawn on a 0 to 1 scale."),
     h("div", { class: `gauges${n > 10 ? " scroll" : ""}` }, sorted.map((r) => h("button", {
       type: "button", class: "gauge-row", onclick: () => open(r.i), "aria-label": `${r.file_id}, D ${r.prediction.toFixed(3)}, ${r.level}`,
     }, h("span", { class: "g-name" }, r.file_id), gauge(r), h("span", { class: "g-val" }, r.prediction.toFixed(3))))),
-    legend([["< 0.25", "sw-ok"], ["0.25 to 0.5", "sw-watch"], ["0.5 to 0.8", "sw-plan"], ["≥ 0.8", "sw-act"]]));
+    legend([["D < 1", "sw-s1"], ["D ≥ 1, failure expected (Miner's rule)", "sw-act"]]));
 
   const cols = [
     { key: "file_id", label: "File" },
@@ -442,26 +418,16 @@ export function shmView({ result, detail, fit }, { openPanel }) {
     { key: "prediction", label: "Segments to D = 1", num: true, fmt: (v) => lifeLeft(v) },
     { key: "cycles", label: "Rainflow cycles", num: true, fmt: (v) => (v ? int(v) : "-") },
   ];
-  const records = filterable(rows, (r) => r.level !== "ok", cols, { maxHeight: 520, onOpen: (r) => open(r.i), rowClass: (r) => (r.level === "act" || r.level === "plan" ? "row-bad" : ""), caption: "Stress segments" });
+  const records = filterable(rows, (r) => r.level === "fault", cols, { maxHeight: 520, onOpen: (r) => open(r.i), rowClass: (r) => (r.level === "fault" ? "row-bad" : ""), caption: "Stress segments" });
 
   const signals = [card(titled("h3", "S-N fit", "D = Σ nᵢ·σᵢᵐ / C, fitted to the 64 labelled segments. m = 5 is a typical exponent for welded steel."),
     kv([["m", fit.m.toFixed(2)], ["C", fit.C.toPrecision(3)], ["Amplitude cut-off", String(fit.amplitude_cutoff)], ["Leave-one-out MAPE", `${(fit.loo_mape * 100).toFixed(1)}%`]]))];
 
-  const names = (rs) => (rs.length <= 2 ? rs.map((r) => r.file_id).join(", ") : `${rs[0].file_id} +${rs.length - 1}`);
-  const acts = sorted.filter((r) => r.level === "act");
-  const plans = sorted.filter((r) => r.level === "plan");
-  const watches = sorted.filter((r) => r.level === "watch");
-  const actions = [];
-  if (acts.length) actions.push(`NDT crack inspection at measurement point (${names(acts)})`, "Review load: passenger load, track and wheel condition");
-  if (plans.length) actions.push(`Add to next NDT inspection (${names(plans)})`);
-  if (watches.length) actions.push(`Keep monitoring (${names(watches)})`);
-  if (!actions.length) actions.push("No action required");
-
   return {
     level,
-    headline: n === 1 ? `Cumulative damage D = ${worst.prediction.toFixed(2)}` : need.length ? `${need.length} of ${n} segments at D ≥ 0.5` : watch.length ? `${watch.length} of ${n} segments at D ≥ 0.25` : `All ${n} segments below D = 0.25`,
+    headline: n === 1 ? `Cumulative damage D = ${worst.prediction.toFixed(2)}` : failed.length ? `${failed.length} of ${n} segments at D ≥ 1` : `All ${n} segments below D = 1`,
     tile: { value: worst.prediction.toFixed(2), caption: n === 1 ? "cumulative damage D" : `max D, ${n} segments` },
-    mini: h("div", { class: "mini-bars" }, sorted.slice(0, 16).map((r) => h("i", { class: `sev-${r.level}`, style: `height:${Math.max(8, Math.min(100, r.prediction * 100))}%` }))),
+    mini: h("div", { class: "mini-bars" }, sorted.slice(0, 16).map((r) => h("i", { class: r.level === "fault" ? "sev-fault" : "", style: `height:${Math.max(8, Math.min(100, r.prediction * 100))}%` }))),
     stats: n === 1 ? [
       stat({ label: "Cumulative damage D", value: worst.prediction.toFixed(3), chip: levelChip(level), tip: "Miner's rule: fatigue failure is expected at D = 1." }),
       stat({ label: "Segments to D = 1", value: lifeLeft(worst.prediction), tip: "Further segments of the same length and loading before D reaches 1." }),
@@ -469,16 +435,16 @@ export function shmView({ result, detail, fit }, { openPanel }) {
     ] : [
       stat({ label: "Segments", value: int(n) }),
       stat({ label: "Max D", value: worst.prediction.toFixed(3), chip: levelChip(level), caption: worst.file_id }),
-      stat({ label: "D ≥ 0.5", value: int(need.length) }),
-      stat({ label: "0.25 ≤ D < 0.5", value: int(watch.length) }),
+      stat({ label: "D ≥ 1", value: int(failed.length), caption: "failure expected (Miner's rule)" }),
+      stat({ label: "Median D", value: median.toFixed(3) }),
     ],
-    main, actions, records, signals,
+    main, records, signals,
     method: `Rainflow counting (ASTM E1049), then Miner's rule with a fitted S-N curve (m = ${fit.m.toFixed(2)}). Leave-one-out MAPE ${(fit.loo_mape * 100).toFixed(1)}%.`,
     csv: { filename: "shm_predictions.csv", text: toCsv(result.map((r) => ({ ...r, prediction: pyFloat(r.prediction) })), ["file_id", "prediction"]) },
     print: {
       note: "Segments by cumulative damage",
       columns: ["File", "D", "Status"],
-      rows: sorted.slice(0, 20).map((r) => [r.file_id, r.prediction.toFixed(3), { ok: "Normal", watch: "Monitor", plan: "Plan", act: "Act now" }[r.level]]),
+      rows: sorted.slice(0, 20).map((r) => [r.file_id, r.prediction.toFixed(3), LEVELS[r.level].label]),
     },
   };
 }

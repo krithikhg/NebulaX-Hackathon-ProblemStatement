@@ -1,4 +1,4 @@
-"""Shared helpers for the TrainWhisper condition-monitoring pipelines."""
+"""Shared helpers for the MAVIS condition-monitoring pipelines."""
 from __future__ import annotations
 
 import os

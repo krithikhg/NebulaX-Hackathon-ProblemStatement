@@ -1,4 +1,4 @@
-# TrainWhisper on Cloud Run: one process serves the web app and runs the same
+# MAVIS on Cloud Run: one process serves the web app and runs the same
 # Python pipelines that write the submission CSVs.
 FROM python:3.12-slim
 

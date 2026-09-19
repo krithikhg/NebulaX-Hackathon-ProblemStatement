@@ -1,4 +1,4 @@
-// TrainWhisper UI shell. Models run in a Web Worker (worker.js); views.js turns each payload into
+// MAVIS UI shell. Models run in a Web Worker (worker.js); views.js turns each payload into
 // page parts; this file handles routing, the side menu, uploads, the detail panel, zip and print.
 import { BENCHMARK, HEADLINES } from "./benchmark.js";
 import {
@@ -47,7 +47,7 @@ function closePanel() {
 }
 
 /** Entrance order for list-like containers, and count-up for figures. */
-const STAGGERED = ".page, .tab-body, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
+const STAGGERED = ".page, .tab-body, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .panel-body";
 function enhance(root) {
   stagger(root, STAGGERED);
   if (root.matches && root.matches(".tab-body")) [...root.children].forEach((c, i) => c.style.setProperty("--i", i));
@@ -121,11 +121,17 @@ async function analyse(files, hint) {
   try {
     const groups = new Map();
     const unknown = [];
+    let rejected = 0;
     for (const f of files) {
       const detected = await detect(f);
+      // A file uploaded for one subsystem that looks like another is flagged, never re-routed.
+      if (detected && hint && detected !== hint) {
+        notes.push(`${f.name} was not analysed: it looks like ${SYSTEMS[detected].title} data, not ${SYSTEMS[hint].title}. Upload it on the ${SYSTEMS[detected].title} tile or page.`);
+        rejected++;
+        continue;
+      }
       const kind = detected || hint;
       if (!kind) { unknown.push(f.name); continue; }
-      if (detected && hint && detected !== hint) notes.push(`${f.name} was recognised as ${SYSTEMS[detected].title} data.`);
       if (!groups.has(kind)) groups.set(kind, []);
       groups.get(kind).push(f);
     }
@@ -156,17 +162,18 @@ async function analyse(files, hint) {
       }
     }
     setStatus("");
-    // One result opens its page directly; a batch lands on the overview with a single summary.
+    if (rejected) toast([icon("act", 16), h("b", {}, "Wrong subsystem"), h("span", {}, `${rejected} file${rejected > 1 ? "s" : ""} not analysed. See the note above.`)]);
+    // Stay on the current page so several subsystems can be uploaded in a row; the toast links to the result.
     if (done.length === 1) {
       const v = viewOf(done[0]);
-      toast([levelChip(v.level), h("b", {}, SYSTEMS[done[0]].title), h("span", {}, v.headline)]);
+      const key = SYSTEMS[done[0]].key;
+      toast([levelChip(v.level), h("b", {}, SYSTEMS[done[0]].title), h("span", {}, v.headline)], route === key ? {} : { href: `#/${key}` });
     } else if (done.length > 1) {
-      const urgent = done.filter((k) => LEVELS[viewOf(k).level].rank >= 2).length;
-      toast([icon("ok", 16), h("b", {}, `${done.length} subsystems analysed`), h("span", {}, urgent ? `${urgent} need action` : "no action needed")]);
+      const faults = done.filter((k) => viewOf(k).level === "fault").length;
+      toast([icon("ok", 16), h("b", {}, `${done.length} subsystems analysed`), h("span", {}, faults ? `fault detected in ${faults}` : "no faults detected")],
+        route === "overview" ? {} : { href: "#/overview", label: "Overview" });
     }
-    if (done.length === 1) go(SYSTEMS[done[0]].key);
-    else if (done.length > 1) go("overview");
-    else render();
+    render({ keepScroll: true });
   } finally {
     busy = false;
     document.body.classList.remove("busy");
@@ -192,7 +199,7 @@ function currentRoute() {
   return ["overview", "benchmark", "help"].includes(r) || kindByKey(r) ? r : "overview";
 }
 
-function render() {
+function render({ keepScroll = false } = {}) {
   route = currentRoute();
   const kind = kindByKey(route);
   renderMenu();
@@ -201,7 +208,7 @@ function render() {
   const page = route === "overview" ? overviewPage() : route === "benchmark" ? benchmarkPage() : route === "help" ? helpPage() : systemPage(kind);
   content.replaceChildren(...[notes.length ? noticeBox() : null, page].filter(Boolean));
   enhance(content);
-  window.scrollTo(0, 0);
+  if (!keepScroll) window.scrollTo(0, 0);
 }
 
 function noticeBox() {
@@ -288,7 +295,6 @@ function overviewPage() {
         levelChip(v.level),
         h("b", {}, SYSTEMS[k].title),
         h("span", { class: "prio-head" }, v.headline),
-        h("span", { class: "prio-next" }, v.actions[0]),
         icon("arrow", 16));
     }))) : null;
 
@@ -327,9 +333,7 @@ function systemPage(kind) {
     if (t === "summary") {
       body.replaceChildren(
         h("div", { class: "stats" }, v.stats),
-        h("div", { class: "split" }, v.main,
-          card(titled("h3", "Actions", `When: ${LEVELS[v.level].when}.`),
-            h("ul", { class: "checklist" }, v.actions.map((a) => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, a))))))));
+        v.main);
     } else if (t === "records") body.replaceChildren(v.records);
     else body.replaceChildren(...v.signals, h("p", { class: "method" }, icon("info", 14), v.method));
     enhance(body);
@@ -369,7 +373,7 @@ function helpPage() {
         h("li", {}, "Upload on the Overview (any mix of files) or on a subsystem page."),
         h("li", {}, "Select any item in the Summary visual to open its details."),
         h("li", {}, "Download the CSV, or predictions.zip from the side menu."))),
-      card("Status", h("ul", { class: "levels" }, Object.keys(LEVELS).map((l) => h("li", {}, levelChip(l), h("span", {}, LEVELS[l].when)))))),
+      card("Status", h("ul", { class: "levels" }, Object.keys(LEVELS).map((l) => h("li", {}, levelChip(l), h("span", {}, LEVELS[l].desc)))))),
     card("Inputs", table(KINDS.map((k) => ({ s: SYSTEMS[k].title, full: SYSTEMS[k].full, needs: SYSTEMS[k].needs, csv: SYSTEMS[k].csv })), [
       { key: "s", label: "Subsystem" }, { key: "full", label: "Full name" }, { key: "needs", label: "Input" }, { key: "csv", label: "Output", fmt: (v) => h("code", {}, v) },
     ])));
@@ -418,19 +422,18 @@ function printReport(kinds) {
   $("#print-root").replaceChildren(
     h("header", { class: "p-head" },
       h("div", {}, h("h1", {}, kinds.length === 1 ? `${SYSTEMS[kinds[0]].title} job sheet` : "Condition report"),
-        h("p", {}, `TrainWhisper · ${now()}`)),
+        h("p", {}, `MAVIS · Maintenance Analytics & Vehicle Intelligence System · ${now()}`)),
       h("div", {}, "Overall: ", levelChip(Object.keys(LEVELS).find((l) => LEVELS[l].rank === worst)))),
     ...kinds.map((k) => {
       const v = viewOf(k);
       const { files, at } = session.get(k);
       return h("section", { class: `p-sec sev-${v.level}` },
         h("div", { class: "p-sec-head" }, h("h2", {}, `${SYSTEMS[k].title} (${SYSTEMS[k].full})`), levelChip(v.level)),
-        h("p", { class: "p-meta" }, `${files.length === 1 ? files[0] : `${files.length} files`} · analysed ${at} · ${LEVELS[v.level].when}`),
+        h("p", { class: "p-meta" }, `${files.length === 1 ? files[0] : `${files.length} files`} · analysed ${at}`),
         h("p", { class: "p-headline" }, v.headline),
-        h("ul", { class: "p-check" }, v.actions.map((t) => h("li", {}, t))),
         v.print.rows.length ? [h("h3", {}, v.print.note), h("table", {}, h("thead", {}, h("tr", {}, v.print.columns.map((c) => h("th", {}, c)))),
           h("tbody", {}, v.print.rows.map((r) => h("tr", {}, r.map((c) => h("td", {}, c))))))] : h("p", {}, v.print.note),
-        h("div", { class: "p-sign" }, h("span", {}, "Actioned by: ____________________"), h("span", {}, "Date: __________"), h("span", {}, "Work order: __________")));
+        h("div", { class: "p-sign" }, h("span", {}, "Reviewed by: ____________________"), h("span", {}, "Date: __________")));
     }));
   document.body.classList.add("printing");
   const done = () => { document.body.classList.remove("printing"); window.removeEventListener("afterprint", done); };
@@ -439,5 +442,5 @@ function printReport(kinds) {
 }
 
 // ------------------------------------------------------------- start ----
-$("#local-note").replaceChildren(icon("cloud", 14), h("span", {}, "Cloud processing"), info("Files are analysed on the TrainWhisper server and are not stored after the response."));
+$("#local-note").replaceChildren(icon("cloud", 14), h("span", {}, "Cloud processing"), info("Files are analysed on the MAVIS server and are not stored after the response."));
 render();

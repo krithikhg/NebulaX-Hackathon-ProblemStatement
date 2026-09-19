@@ -50,15 +50,15 @@ export function icon(name, size = 20) {
 
 // ------------------------------------------------------ status levels ----
 // One vocabulary for every subsystem: colour + icon + word, never colour alone.
+// Statuses report only what the model found in the data; they do not prescribe urgency or actions.
 export const LEVELS = {
-  act: { label: "Act now", when: "Before the next revenue service", rank: 3 },
-  plan: { label: "Plan", when: "Next engineering hours", rank: 2 },
-  watch: { label: "Monitor", when: "Next routine inspection", rank: 1 },
-  ok: { label: "Normal", when: "No action", rank: 0 },
+  fault: { label: "Fault detected", icon: "act", desc: "The model flagged a fault in this data.", rank: 2 },
+  na: { label: "Not assessed", icon: "info", desc: "The data could not be assessed, e.g. a rail recording taken while the train was stationary.", rank: 1 },
+  ok: { label: "No fault", icon: "ok", desc: "The model flagged no fault in this data.", rank: 0 },
 };
 
 export function levelChip(level, text = LEVELS[level].label) {
-  return h("span", { class: `chip sev-${level}` }, icon(level, 13), text);
+  return h("span", { class: `chip sev-${level}` }, icon(LEVELS[level] ? LEVELS[level].icon : level, 13), text);
 }
 
 // ---------------------------------------------------------- systems ----

@@ -56,7 +56,7 @@ def run(subsystem: str, input_path: str, submission_only: bool = True) -> pd.Dat
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="TrainWhisper inference")
+    ap = argparse.ArgumentParser(description="MAVIS inference")
     ap.add_argument("--subsystem", required=True,
                     choices=["door", "acv", "rail", "shm"])
     ap.add_argument("--input", required=True, help="file or folder")
