@@ -1,7 +1,7 @@
 """Figures for the SHM solution.
 
 Run:  cd PS3/solution && ../../.venv/bin/python -m shm.report_figs
-Out:  PS3/solution/shm/figures/*.png
+Out:  PS3/subsystems/shm/figures/*.png
 """
 from __future__ import annotations
 

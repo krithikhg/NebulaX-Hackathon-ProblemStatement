@@ -195,25 +195,24 @@ def rail_payload(path: str, name: str) -> dict:
 
 def shm_payload(path: str, name: str) -> dict:
     signal = shm.load_signal(path)
-    damage, cyc = shm.predict_signal(signal)
-    fit = shm._fit()
-    cycles = int(cyc[:, 1].sum()) if len(cyc) else 0
-    peak = float(cyc[:, 0].max()) if len(cyc) else 0.0
+    value, (ranges, _, count) = shm.predict_signal(signal)
+    const = shm.constants()
+    amplitude = ranges / 2.0
+    cycles = np.column_stack([amplitude, count]) if ranges.size else np.zeros((0, 2))
     return {
-        "result": [{"file_id": name, "prediction": _num(damage)}],
+        "result": [{"file_id": name, "prediction": _num(value)}],
         "detail": [{
             "file_id": name,
             "samples": int(len(signal)),
-            "cycles": cycles,
-            "peak_amplitude": _num(peak),
-            "histogram": _histogram(cyc, 40),
+            "cycles": int(count.sum()) if ranges.size else 0,
+            "peak_amplitude": _num(amplitude.max()) if amplitude.size else 0.0,
+            "histogram": _histogram(cycles, 40),
         }],
         "fit": {
-            "m": fit["m"],
-            "C": fit["C"],
-            "amplitude_cutoff": fit["amplitude_cutoff"],
-            "loo_mape": fit["loo_mape"],
-            "loo_score": fit.get("loo_score"),
+            "m": const["m"],
+            "C": 1.0 / const["k"],
+            "amplitude_cutoff": 0.0,
+            "loo_mape": const.get("bank_cv_mape", const.get("mape")),
         },
     }
 

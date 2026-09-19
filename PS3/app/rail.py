@@ -12,7 +12,7 @@ Split across three modules:
 
 The saved bundle, models/rail_model.joblib, is 10 seed-averaged LightGBM models
 over the top-40 features, plus `stationary_speed` for the UI's "not assessed"
-rule. It is produced by PS3/solution/rail.
+rule. It is produced by PS3/subsystems/rail.
 """
 from __future__ import annotations
 

@@ -9,6 +9,7 @@ joblib==1.6.0
 lightgbm==4.7.0
 PyWavelets==1.10.0
 rainflow==3.2.0
+fatpack==0.7.8
 openpyxl==3.1.5
 fastapi==0.141.1
 uvicorn[standard]

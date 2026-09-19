@@ -16,7 +16,8 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY common.py door.py acv.py rail.py rail_io.py rail_features.py shm.py server.py ./
+COPY common.py door.py acv.py rail.py rail_io.py rail_features.py \
+     shm.py shm_io.py shm_damage.py shm_fit.py server.py ./
 COPY models ./models
 COPY public ./public
 

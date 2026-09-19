@@ -1,6 +1,6 @@
 # PS3 (Rail Corrugation + SHM) — runtime environment.
 #   python3 -m venv --system-site-packages .venv
-#   .venv/bin/pip install -r PS3/solution/requirements.txt
+#   .venv/bin/pip install -r PS3/subsystems/requirements.txt
 numpy
 scipy
 pandas

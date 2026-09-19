@@ -37,7 +37,7 @@ import pandas as pd
 # imports behave the same from a notebook, a script or a subfolder. Set the
 # PS3_DATA environment variable to point somewhere else entirely.
 DATA_ROOT = pathlib.Path(
-    os.environ.get("PS3_DATA", pathlib.Path(__file__).resolve().parent.parent / "02_Datasets")
+    os.environ.get("PS3_DATA", pathlib.Path(__file__).resolve().parent.parent.parent / "02_Datasets")
 )
 
 DOOR_DIR = DATA_ROOT / "Door"

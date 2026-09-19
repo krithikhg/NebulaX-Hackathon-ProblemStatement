@@ -68,8 +68,8 @@ FLOOR_GRID = [0.01, 0.02, 0.05, 0.10, 0.20, 0.50, 1.00]
 STATISTIC_GRID = ["top05_z2", "scan_p90", "scan_p95", "scan_p99"]
 
 HERE = pathlib.Path(__file__).resolve().parent
-DEFAULT_TRAIN = HERE.parent / "02_Datasets" / "Door" / "Train.csv"
-DEFAULT_TRAIN_ANSWER = HERE.parent / "02_Datasets" / "Door" / "Train_Segments_Answer.csv"
+DEFAULT_TRAIN = HERE.parent.parent / "02_Datasets" / "Door" / "Train.csv"
+DEFAULT_TRAIN_ANSWER = HERE.parent.parent / "02_Datasets" / "Door" / "Train_Segments_Answer.csv"
 
 
 # ---- loading & segmentation -------------------------------------------------

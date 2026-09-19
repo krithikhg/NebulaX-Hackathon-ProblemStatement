@@ -56,7 +56,7 @@ import pandas as pd
 # how to parse `Car <NN> - <parameter>` headers; reuse it rather than keeping a
 # second copy of the paths around to drift out of sync.
 _PS3_ROOT = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_PS3_ROOT / "Door subproblem"))
+sys.path.insert(0, str(_PS3_ROOT / "door"))
 
 import ps3_data  # noqa: E402
 

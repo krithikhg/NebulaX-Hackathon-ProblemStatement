@@ -1,6 +1,6 @@
 """Prototype benchmark: physics inverse vs ML baselines vs residual correction.
 
-Run:  cd PS3/solution && ../../.venv/bin/python -m shm.benchmark
+Run:  cd PS3/subsystems && ../../.venv/bin/python -m shm.benchmark
 """
 from __future__ import annotations
 

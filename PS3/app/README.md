@@ -39,7 +39,7 @@ views expect. There is no JavaScript port of any model to keep in sync.
 ## Deploying on Google Cloud Run
 
 ```bash
-cd PS3/trainwhisper
+cd PS3/app
 gcloud run deploy trainwhisper \
   --source . \
   --region us-central1 \

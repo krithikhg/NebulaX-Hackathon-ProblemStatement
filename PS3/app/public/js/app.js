@@ -394,7 +394,7 @@ function benchmarkPage() {
       const b = HEADLINES[k];
       return stat({ label: SYSTEMS[k].title, value: b.score.toFixed(3), caption: b.metric, iconName: k, tip: `${b.plain} Scale: ${b.scale}. Validation: ${b.validation}.` });
     })),
-    card(titled("h3", "All approaches", "Door uses a chronological split (one continuous stream). Rail selects its top-40 features inside each fold. SHM uses leave-one-out."),
+    card(titled("h3", "All approaches", "Door uses a chronological stream split. Rail selects its top-40 features inside each fold. ACV fits nothing (peers are the control). SHM uses 8-fold CV."),
       table(BENCHMARK.map(([Subsystem, Model, Validation, Metric, Score, Status]) => ({ Subsystem: SYSTEMS[Subsystem].title, Model, Validation, Metric, Score, Status })), [
         { key: "Subsystem", label: "Subsystem" },
         { key: "Model", label: "Approach" },

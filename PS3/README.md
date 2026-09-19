@@ -14,13 +14,13 @@ The sections below are grouped per subsystem.
 ```bash
 # from the repository root
 python3 -m venv --system-site-packages .venv
-.venv/bin/pip install -r PS3/solution/requirements.txt
+.venv/bin/pip install -r PS3/subsystems/requirements.txt
 ```
 
 ## Layout
 
 ```
-PS3/solution/
+PS3/subsystems/
 ├── common/metrics.py        # macro F1 / confusion helpers
 ├── rail/                    # Rail Corrugation subsystem
 │   ├── io.py                # CSV loading, channel reshape, speed/phase extraction, order resampling
@@ -50,7 +50,7 @@ PS3/solution/
 ## Run
 
 ```bash
-cd PS3/solution
+cd PS3/subsystems
 # inference on new files/dir (loads the saved model):
 ../../.venv/bin/python -m rail.predict --input <dir-or-file.csv> --output <out.csv>
 # retrain from the provided Train set and score the provided Test set:
@@ -125,7 +125,7 @@ calibrate its constants**, then refine with a physics-informed regression — no
 to learn it blindly from generic features.
 
 ```bash
-cd PS3/solution
+cd PS3/subsystems
 ../../.venv/bin/python -m shm.predict      # writes shm/predictions/shm_predictions.csv
 ../../.venv/bin/python -m shm.benchmark    # physics vs ML vs residual comparison
 ../../.venv/bin/python -m shm.report_figs  # figures -> shm/figures/

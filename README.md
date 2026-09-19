@@ -17,8 +17,10 @@ NebulaX-Hackathon-ProblemStatement/
     ├── 02_Datasets/                   # Train/test datasets for each subsystem
     ├── 03_References/                 # Info kits and data documentation
     ├── 04_Example_Submission/         # Example prediction files
-    ├── Door subproblem/               # Door-related exploratory work
-    └── trainwhisper/                  # The app (web UI + models) and Python pipeline
+    ├── app/                           # The web app (Cloud Run) + Python pipelines
+    └── subsystems/                    # Per-subsystem models and development work
+        ├── door/  acv/  rail/  shm/   # one folder per subsystem
+        └── common/                    # shared metrics helpers
 ```
 
 ## Problem Statement
@@ -32,7 +34,7 @@ Start here:
 - PS3/02_Datasets/
 - PS3/03_References/
 - PS3/04_Example_Submission/
-- PS3/trainwhisper/ (app: see its README)
+- PS3/app/ (app: see its README)
 
 ## LTA DataMall API
 
