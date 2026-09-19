@@ -467,5 +467,5 @@ function printReport(kinds) {
 }
 
 // ------------------------------------------------------------- start ----
-$("#local-note").replaceChildren(icon("lock", 14), h("span", {}, "Local processing"), info("Files are analysed in this browser and never leave the computer."));
+$("#local-note").replaceChildren(icon("cloud", 14), h("span", {}, "Cloud processing"), info("Files are analysed on the TrainWhisper server and are not stored after the response."));
 render();

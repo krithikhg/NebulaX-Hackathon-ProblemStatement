@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Python
 __pycache__/
 *.py[cod]
@@ -21,12 +20,6 @@ Thumbs.db
 *.pkl
 *.h5
 *.keras
-=======
-.venv/
-__pycache__/
-*.pyc
-*.pyo
 PS3/solution/**/cache/
 *.npy
 *.npz
->>>>>>> 72f1124 (Rail corrugation prediction model)

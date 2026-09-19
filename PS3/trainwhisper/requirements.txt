@@ -1,6 +1,15 @@
-pandas>=2.0
-numpy>=1.26
-scikit-learn>=1.4
-joblib>=1.3
-rainflow>=3.2
-openpyxl>=3.1
+# Single environment for the Python pipelines and the Cloud Run backend.
+# scikit-learn is pinned because the .joblib models were fitted with 1.8 and
+# verified unchanged on 1.9.1.
+numpy==2.5.3
+pandas==3.0.6
+scipy==1.18.1
+scikit-learn==1.9.1
+joblib==1.6.0
+lightgbm==4.7.0
+PyWavelets==1.10.0
+rainflow==3.2.0
+openpyxl==3.1.5
+fastapi==0.141.1
+uvicorn[standard]
+python-multipart
