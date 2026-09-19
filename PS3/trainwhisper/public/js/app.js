@@ -1,421 +1,471 @@
-// TrainWhisper UI. Models run in a Web Worker (worker.js); this file handles input and rendering.
-import { bars, segmentedLine } from "./charts.js";
-import { remainingLife } from "./engine/shm.js";
-import { pyFloat, toCsv } from "./engine/util.js";
+// TrainWhisper UI shell. Models run in a Web Worker (worker.js); views.js turns each payload into
+// page parts; this file handles routing, the side menu, uploads, the detail panel, zip and print.
+import { BENCHMARK, HEADLINES } from "./benchmark.js";
+import {
+  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, saveBlob, segmented, stagger, stat, table, titled, toast,
+} from "./ui.js";
+import { hideTooltip, showTooltip } from "./charts.js";
+import { VIEWS } from "./views.js";
+import { makeZip } from "./zip.js";
 
 const SAMPLE_BASE = "https://raw.githubusercontent.com/krithikhg/NebulaX-Hackathon-ProblemStatement/main/PS3/02_Datasets/";
 const SAMPLES = {
   door: { kind: "Door", path: "Door/Test.csv" },
   acv: { kind: "ACV", path: "ACV/Test/acv_test_case.xlsx" },
   rail: { kind: "Rail corrugation", path: "Rail_Corrugation/Test/Test5.csv" },
-  shm: { kind: "SHM", path: "SHM/Test/test01.csv" },
+  shm: { kind: "SHM", path: "SHM/Test/test02.csv" },
 };
+const SINGLE_FILE = new Set(["Door", "ACV"]);
 
-const BENCHMARK = [
-  ["Door", "Gap segmentation + Random Forest", "Chronological holdout", "macro F1", 1.0, "selected"],
-  ["Door", "Gap segmentation + fixed current threshold", "Chronological holdout", "macro F1", 0.86, "baseline"],
-  ["ACV", "Cabin-temp deviation vs train median (+pressure)", "6 labelled cases", "rank decay", 0.958, "selected"],
-  ["ACV", "Absolute cabin temperature", "6 labelled cases", "rank decay", 0.71, "baseline"],
-  ["Rail", "Spectral features/side + tuned priors", "Nested CV", "macro F1", 0.743, "selected"],
-  ["Rail", "Same features, untuned priors", "5-fold CV", "macro F1", 0.653, "ablation"],
-  ["Rail", "Wavelength-normalised spectra", "5-fold CV", "macro F1", 0.556, "rejected"],
-  ["Rail", "Per-axle-box model, aggregated", "Grouped CV", "macro F1", 0.633, "rejected"],
-  ["Rail", "Always predict Normal", "—", "macro F1", 0.33, "baseline"],
-  ["SHM", "Rainflow + fitted Miner (m, C)", "Leave-one-out", "1 − MAPE", 0.975, "selected"],
-  ["SHM", "Mean of training labels", "Leave-one-out", "1 − MAPE", 0.0, "baseline"],
-];
-
-const $ = (sel) => document.querySelector(sel);
-const results = $("#results");
+const content = $("#content");
 const statusEl = $("#status");
 
-function h(tag, attrs = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === "class") node.className = v;
-    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v);
-  }
-  for (const c of children.flat()) if (c !== null && c !== undefined) node.append(c instanceof Node ? c : String(c));
-  return node;
+/** Latest result per subsystem: { payload, files, at, view } */
+const session = new Map();
+const tabOf = new Map(); // subsystem -> "summary" | "records" | "signals"
+let route = "overview";
+let notes = [];
+
+// ------------------------------------------------------------- panel ----
+const panel = $("#panel");
+const scrim = $("#scrim");
+let lastFocus = null;
+function openPanel({ title, subtitle, chip, body }) {
+  lastFocus = document.activeElement;
+  $("#panel-title").replaceChildren(title);
+  $("#panel-sub").replaceChildren(...[chip, subtitle ? h("span", {}, subtitle) : null].filter(Boolean));
+  $("#panel-body").replaceChildren(...[body].flat(Infinity).filter(Boolean));
+  document.querySelectorAll(".is-open").forEach((el) => el.classList.remove("is-open"));
+  if (lastFocus && lastFocus !== document.body) lastFocus.classList.add("is-open");
+  enhance($("#panel"));
+  panel.hidden = false;
+  scrim.hidden = false;
+  requestAnimationFrame(() => panel.classList.add("open"));
+  $("#panel-close").focus();
+}
+function closePanel() {
+  if (panel.hidden) return;
+  panel.classList.remove("open");
+  hideTooltip();
+  scrim.hidden = true;
+  setTimeout(() => { panel.hidden = true; }, 180);
+  document.querySelectorAll(".is-open").forEach((el) => el.classList.remove("is-open"));
+  if (lastFocus && lastFocus.isConnected) lastFocus.focus();
 }
 
-// ------------------------------------------------------------ tabs ----
-const tabs = [...document.querySelectorAll('[role="tab"]')];
-function selectTab(tab) {
-  for (const t of tabs) {
-    const on = t === tab;
-    t.setAttribute("aria-selected", on);
-    t.tabIndex = on ? 0 : -1;
-    document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
-  }
+/** Entrance order for list-like containers, and count-up for figures. */
+const STAGGERED = ".page, .tab-body, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
+function enhance(root) {
+  stagger(root, STAGGERED);
+  if (root.matches && root.matches(".tab-body")) [...root.children].forEach((c, i) => c.style.setProperty("--i", i));
+  countUp(root);
 }
-tabs.forEach((t, i) => {
-  t.addEventListener("click", () => selectTab(t));
-  t.addEventListener("keydown", (e) => {
-    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!d) return;
-    const next = tabs[(i + d + tabs.length) % tabs.length];
-    selectTab(next);
-    next.focus();
-  });
+
+// Instant hover labels for dense marks (native title tooltips are slow to appear).
+document.addEventListener("pointerover", (e) => {
+  const t = e.target.closest && e.target.closest("[data-tip]");
+  if (t) showTooltip(e, t.dataset.tip, t.dataset.tipSub ? [t.dataset.tipSub] : []);
 });
+document.addEventListener("pointerout", (e) => {
+  const t = e.target.closest && e.target.closest("[data-tip]");
+  if (t && !t.contains(e.relatedTarget)) hideTooltip();
+});
+$("#panel-close").addEventListener("click", closePanel);
+scrim.addEventListener("click", closePanel);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closePanel(); closeMenu(); } });
 
-// ------------------------------------------------------- shared UI ----
-const ICONS = {
-  act: "M12 3 2 21h20L12 3Zm0 6v6m0 3v.01",
-  plan: "M12 3 2 21h20L12 3Zm0 6v6m0 3v.01",
-  watch: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5v.01M12 11v6",
-  healthy: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-4 9 3 3 5-6",
-};
-const LEVELS = { "Act now": "act", Plan: "plan", Watch: "watch", Healthy: "healthy" };
-
-function badge(level, message) {
-  const key = LEVELS[level];
-  const icon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[key]}"/></svg>`;
-  const node = h("div", { class: `badge sev-${key}`, role: "note" });
-  node.innerHTML = icon;
-  node.append(h("div", {}, h("b", {}, level), message));
-  return node;
-}
-
-function tile(label, value, sub) {
-  return h("div", { class: "tile" }, h("div", { class: "label" }, label), h("div", { class: "value" }, value), sub ? h("div", { class: "sub" }, sub) : null);
-}
-
-/** columns: [{ key, label, num?, fmt?, pill? }] */
-function table(rows, columns) {
-  const head = h("tr", {}, columns.map((c) => h("th", { class: c.num ? "num" : "", scope: "col" }, c.label)));
-  const body = rows.map((r) => h("tr", {}, columns.map((c) => {
-    const v = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
-    const cell = c.pill ? h("span", { class: `pill ${c.pill(r[c.key], r)}` }, v) : v;
-    return h("td", { class: c.num ? "num" : "" }, cell);
-  })));
-  return h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, head), h("tbody", {}, body)));
-}
-
-function download(rows, columns, filename, label = "Download predictions CSV") {
-  return h("button", {
-    class: "btn primary", type: "button",
-    onclick: () => {
-      const url = URL.createObjectURL(new Blob([toCsv(rows, columns)], { type: "text/csv" }));
-      const a = h("a", { href: url, download: filename });
-      document.body.append(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    },
-  }, label);
-}
-
-function explainer(textContent) {
-  return h("details", {}, h("summary", {}, "How this works"), h("p", {}, textContent));
-}
-
-function chartCard(title, sub, legendItems, build) {
-  const holder = h("div");
-  const card = h("div", { class: "card" },
-    h("h3", {}, title),
-    sub ? h("p", { class: "sub" }, sub) : null,
-    legendItems ? h("div", { class: "legend" }, legendItems.map(([label, color, shape]) => h("span", {}, h("i", { class: shape || "", style: `background:${color}` }), label))) : null,
-    holder);
-  queueMicrotask(() => build(holder));
-  return card;
-}
-
-const fmt = (digits) => (v) => (Number.isFinite(v) ? v.toFixed(digits) : "—");
-const predPill = (v) => (v === "Normal" ? "ok" : "bad");
-
-// --------------------------------------------------------- renderers ----
-function showDoor({ name, result, cycles }) {
-  const bad = result.filter((r) => r.prediction !== "Normal");
-  const meanOf = (rows) => rows.reduce((s, r) => s + r.mean_current_mA, 0) / rows.length;
-  const normal = result.filter((r) => r.prediction === "Normal");
-  const out = [];
-  if (!bad.length) out.push(badge("Healthy", `${result.length} door cycles checked, all normal.`));
-  else {
-    out.push(badge(bad.length >= 5 ? "Act now" : "Plan",
-      `${bad.length} of ${result.length} cycles show abnormal closing resistance. Inspect the slide rail for debris, ` +
-      "check the rubber strip for jamming and the door leaf for deformation at the next engineering hours."));
-  }
-  out.push(h("div", { class: "tiles" },
-    tile("Cycles detected", result.length),
-    tile("Abnormal cycles", bad.length),
-    tile("Mean current, abnormal cycles", bad.length ? `${meanOf(bad).toFixed(0)} mA` : "—",
-      normal.length ? `vs ${meanOf(normal).toFixed(0)} mA for normal cycles` : null)));
-
-  out.push(chartCard("Door motor current", `${name} — abnormal-resistance cycles shaded.`,
-    [["Motor current", "var(--text-2)", "line"], ["Abnormal-resistance cycle", "var(--critical)", "span"]],
-    (holder) => segmentedLine(holder, {
-      cycles,
-      yLabel: "Motor current (mA)",
-      ariaLabel: `Door motor current across ${cycles.length} cycles; ${bad.length} abnormal cycles shaded`,
-      describe: (p, ci) => [`${p[1].toFixed(0)} mA`, [
-        `Cycle ${ci + 1} — ${result[ci].prediction}`,
-        new Date(p[2]).toISOString().replace("T", " ").replace("Z", ""),
-      ]],
-    })));
-
-  out.push(table(result, [
-    { key: "start_time", label: "Start" },
-    { key: "end_time", label: "End" },
-    { key: "prediction", label: "Prediction", pill: predPill },
-    { key: "confidence", label: "Confidence", num: true, fmt: fmt(3) },
-    { key: "mean_current_mA", label: "Mean current (mA)", num: true, fmt: fmt(1) },
-    { key: "peak_current_mA", label: "Peak current (mA)", num: true, fmt: fmt(1) },
-  ]));
-  out.push(h("div", { class: "actions" }, download(result, ["start_time", "end_time", "prediction"], "door_predictions.csv")));
-  out.push(explainer(
-    "Cycles are found by splitting the stream wherever the gap between consecutive samples exceeds 0.1 s — inside a " +
-    "cycle the controller logs every 20 ms. On the labelled training stream this reproduced all 110 ground-truth " +
-    "boundaries exactly. Each cycle is then classified from its motor current, voltage and back-EMF profile."));
-  return out;
-}
-
-function showAcv({ name, ranked }) {
-  const top = ranked[0];
-  const out = [badge("Plan",
-    `Car ${top.car} is the most likely refrigerant leak — its cabin runs ${top.cabin_temp_dev_C >= 0 ? "+" : ""}` +
-    `${top.cabin_temp_dev_C.toFixed(2)} °C hotter than the train median under the same conditions. ` +
-    "Pressure-test the circuit and check for oil traces at the joints.")];
-
-  out.push(chartCard("Cabin temperature vs train median", "Cars in rank order, most likely leak first.",
-    [["Most likely leak", "var(--serious)"], ["Other cars", "var(--neutral-bar)"]],
-    (holder) => bars(holder, {
-      labels: ranked.map((r) => `Car ${r.car}`),
-      series: [{ name: "Deviation", values: ranked.map((r) => r.cabin_temp_dev_C), colors: ranked.map((_, i) => (i ? "var(--neutral-bar)" : "var(--serious)")) }],
-      yLabel: "Deviation (°C)",
-      ariaLabel: `Cabin temperature deviation per car; car ${top.car} highest`,
-      tip: (_, i) => [`${ranked[i].cabin_temp_dev_C >= 0 ? "+" : ""}${ranked[i].cabin_temp_dev_C.toFixed(3)} °C`, [`Car ${ranked[i].car} — rank ${i + 1} of ${ranked.length}`]],
-    })));
-
-  const cols = [
-    { key: "rank", label: "Rank", num: true },
-    { key: "car", label: "Car" },
-    { key: "score", label: "Score", num: true, fmt: fmt(4) },
-    { key: "cabin_temp_dev_C", label: "Cabin temp dev (°C)", num: true, fmt: fmt(4) },
-  ];
-  if ("low_pressure_dev" in top) cols.push({ key: "low_pressure_dev", label: "Low-pressure dev", num: true, fmt: fmt(4) });
-  out.push(table(ranked.map((r, i) => ({ ...r, rank: i + 1 })), cols));
-
-  const row = { file_id: name.split(/[\\/]/).pop(), ranked_cars: ranked.map((r) => r.car).join("|") };
-  out.push(h("div", { class: "actions" },
-    download([row], ["file_id", "ranked_cars"], "acv_predictions.csv"),
-    h("span", { class: "caption" }, "Submission row: ", h("code", {}, row.ranked_cars))));
-  out.push(explainer(
-    "The train is its own control group: at each timestamp every car's cabin temperature is compared with the median " +
-    "across cars, so weather, time of day and setpoint changes cancel out. Cars are ranked by mean deviation. The loader " +
-    "reads each file's own headers, so workbooks with 8 or 59 parameters per car both work."));
-  return out;
-}
-
-function showRail({ result, bands, bandLabels }) {
-  const faults = result.filter((r) => r.prediction !== "Normal");
-  const out = [];
-  if (!faults.length) out.push(badge("Healthy", `${result.length} recordings checked, no corrugation detected.`));
-  else {
-    const sides = [...new Set(faults.map((r) => r.prediction))].sort().join(", ");
-    out.push(badge("Plan", `Corrugation detected in ${faults.length} of ${result.length} recordings (${sides}). ` +
-      "Schedule rail grinding on the affected side and re-measure after the next grinding cycle."));
-  }
-  out.push(table(result, [
-    { key: "file_id", label: "File" },
-    { key: "prediction", label: "Prediction", pill: predPill },
-    { key: "confidence", label: "Confidence", num: true, fmt: fmt(3) },
-    { key: "speed_m_s", label: "Speed (m/s)", num: true, fmt: fmt(2) },
-  ]));
-  out.push(h("div", { class: "actions" }, download(result, ["file_id", "prediction"], "rail_predictions.csv")));
-
-  const holder = h("div");
-  const caption = h("p", { class: "caption" });
-  const select = h("select", { "aria-label": "Recording to inspect" }, bands.map((b) => h("option", { value: b.file_id }, b.file_id)));
-  const draw = () => {
-    const b = bands.find((x) => x.file_id === select.value);
-    holder.replaceChildren();
-    const inner = h("div");
-    holder.append(inner);
-    bars(inner, {
-      labels: bandLabels,
-      series: [{ name: "Side I", values: b.side1, color: "var(--series-1)" }, { name: "Side II", values: b.side2, color: "var(--series-2)" }],
-      yLabel: "Log energy",
-      xLabel: "Frequency band (Hz)",
-      height: 300,
-      ariaLabel: `Vibration band energy per rail side for ${b.file_id}`,
-      tip: (si, i) => [(si ? b.side2 : b.side1)[i].toFixed(3), [`${si ? "Side II" : "Side I"} · ${bandLabels[i]} Hz`, `Side I − Side II: ${(b.side1[i] - b.side2[i]).toFixed(3)}`]],
-    });
-    const r = result.find((x) => x.file_id === b.file_id);
-    caption.textContent = `${b.file_id}: ${r.prediction}. Speed ${b.speed.toFixed(1)} m/s — corrugation shows as a one-sided energy excess, which is why the two sides are compared directly.`;
-  };
-  select.addEventListener("change", draw);
-  const firstFault = faults[0];
-  if (firstFault) select.value = firstFault.file_id;
-  out.push(h("div", { class: "card" },
-    h("h3", {}, "Inspect a recording"),
-    h("p", { class: "sub" }, "Mean vibration log-energy per frequency band across each side's 32 axle boxes."),
-    h("div", { class: "actions", style: "margin-bottom:8px" }, select),
-    h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:var(--series-1)" }), "Side I"), h("span", {}, h("i", { style: "background:var(--series-2)" }), "Side II")),
-    holder, caption));
-  queueMicrotask(draw);
-  out.push(explainer(
-    "Per channel: RMS, peak, kurtosis and log energy in 9 frequency bands, aggregated per rail side across its 32 axle " +
-    "boxes, plus side-difference features. Raw speed is deliberately not a feature, and stationary recordings are " +
-    "forced to Normal — with no wheel-rail excitation there is no corrugation signature to detect."));
-  return out;
-}
-
-function showShm({ result, histogram, histogramFile, fit }) {
-  const worst = result.reduce((a, b) => (b.prediction > a.prediction ? b : a));
-  const left = remainingLife(worst.prediction);
-  const leftText = left < 1 ? "less than one more segment" : `about ${left.toFixed(left < 10 ? 1 : 0)} more segments`;
-  const out = [badge(worst.prediction < 0.5 ? "Watch" : "Plan",
-    `Highest cumulative damage: ${worst.prediction.toFixed(3)} on ${worst.file_id} (Miner's rule fails at D = 1). ` +
-    `At this rate the measurement point has ${leftText} of equivalent service before ` +
-    "reaching the fatigue limit.")];
-
-  out.push(table(result, [
-    { key: "file_id", label: "File" },
-    { key: "prediction", label: "Cumulative damage D", num: true, fmt: fmt(4) },
-    { key: "life", label: "Segments to D = 1", num: true, fmt: (_, r) => { const v = remainingLife(r.prediction); return Number.isFinite(v) ? v.toFixed(0) : "—"; } },
-  ]));
-  out.push(h("div", { class: "actions" }, download(result.map((r) => ({ ...r, prediction: pyFloat(r.prediction) })), ["file_id", "prediction"], "shm_predictions.csv")));
-
-  out.push(chartCard("Rainflow cycle histogram", `${histogramFile} — cycle count per stress-amplitude bin (log scale).`, null,
-    (holder) => bars(holder, {
-      labels: histogram.map((b) => b.lo.toFixed(1)),
-      series: [{ name: "Cycles", values: histogram.map((b) => b.count), color: "var(--series-1)" }],
-      yLabel: "Cycle count",
-      xLabel: "Stress amplitude (bin start)",
-      log: true,
-      ariaLabel: `Rainflow cycle histogram for ${histogramFile}`,
-      tip: (_, i) => [`${histogram[i].count} cycles`, [`Amplitude ${histogram[i].lo.toFixed(2)}–${histogram[i].hi.toFixed(2)}`]],
-    })));
-
-  if (result.length > 1) {
-    out.push(chartCard("Cumulative damage per file", "Miner's rule predicts fatigue failure at D = 1.", null,
-      (holder) => bars(holder, {
-        labels: result.map((r) => r.file_id),
-        series: [{ name: "Damage", values: result.map((r) => r.prediction), color: "var(--series-1)" }],
-        yLabel: "Cumulative damage D",
-          ariaLabel: "Cumulative fatigue damage per file",
-        tip: (_, i) => [result[i].prediction.toFixed(4), [result[i].file_id]],
-      })));
-  }
-  out.push(explainer(
-    `Rainflow counting extracts stress cycles, then Miner's rule sums the damage using an S-N curve fitted to the ` +
-    `labelled files: m = ${fit.m.toFixed(2)}, C = ${fit.C.toPrecision(3)}. Leave-one-out error is ${(fit.loo_mape * 100).toFixed(1)}%.`));
-  return out;
-}
-
-const RENDER = { Door: showDoor, ACV: showAcv, "Rail corrugation": showRail, SHM: showShm };
-
-// ---------------------------------------------------------- running ----
-function detectSubsystem(name, head) {
-  const lower = name.toLowerCase();
-  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "ACV";
-  const text = new TextDecoder().decode(head).slice(0, 400);
-  if (text.includes("Datetime") && text.includes("Motor current")) return "Door";
-  if (text.includes("Vibration of bearing")) return "Rail corrugation";
-  const first = text.split(/\r?\n/)[0] || "";
-  if (first && !first.includes(",")) return "SHM";
-  return null;
-}
-
+// ------------------------------------------------------------ status ----
 function setStatus(message, { error = false, done, total } = {}) {
   statusEl.hidden = !message;
   statusEl.classList.toggle("error", error);
   statusEl.replaceChildren();
   if (!message) return;
-  if (!error) statusEl.append(total ? h("progress", { max: total, value: done }) : h("progress"));
-  statusEl.append(message);
+  statusEl.append(error ? icon("act", 16) : h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, message));
+  if (!error && total > 1) statusEl.append(h("progress", { max: total, value: done }));
+  if (error) statusEl.append(h("button", { type: "button", class: "link", onclick: () => setStatus("") }, "Dismiss"));
 }
 
+// ------------------------------------------------------------ worker ----
 let worker = null;
-let busy = false;
-
-function runWorker(kind, files) {
+function runWorker(kind, files, label) {
   if (!worker) worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   return new Promise((resolve, reject) => {
     worker.onmessage = ({ data }) => {
-      if (data.type === "progress") setStatus(data.label, data);
+      if (data.type === "progress") setStatus(`${label}: ${data.label}`, data);
       else if (data.type === "result") resolve(data.payload);
       else reject(new Error(data.message));
     };
-    worker.onerror = (e) => reject(new Error(e.message || "The analysis worker failed to start."));
-    worker.postMessage({ kind, files }, files.map((f) => f.buffer));
+    worker.onerror = (e) => reject(new Error(e.message || "The analysis could not start."));
+    worker.postMessage({ kind, files });
   });
 }
 
-async function analyse(files, forcedKind) {
+async function detect(file) {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "ACV";
+  const text = new TextDecoder().decode(await file.blob.slice(0, 2048).arrayBuffer()).slice(0, 600);
+  if (text.includes("Datetime") && text.includes("Motor current")) return "Door";
+  if (text.includes("Vibration of bearing")) return "Rail corrugation";
+  const first = text.split(/\r?\n/)[0] || "";
+  if (first && !first.includes(",") && Number.isFinite(Number(first.trim()))) return "SHM";
+  return null;
+}
+
+const FRIENDLY_ERRORS = [
+  [/Datetime/, "Not a door controller stream: no 'Datetime' column."],
+  [/No 'Car NN/, "No per-car columns ('Car NN - ...') in this workbook."],
+  [/cabin-temperature/, "No cabin temperature channel in this workbook."],
+];
+const friendly = (msg) => (FRIENDLY_ERRORS.find(([re]) => re.test(msg)) || [null, msg])[1];
+
+let busy = false;
+/** hint: subsystem to assume when a file can't be recognised (the page the user is on, or a sample). */
+async function analyse(files, hint) {
   if (busy || !files.length) return;
   busy = true;
-  document.querySelectorAll(".samples button").forEach((b) => { b.disabled = true; });
-  results.classList.add("stale");
+  document.body.classList.add("busy");
+  notes = [];
   try {
-    const choice = document.querySelector('input[name="kind"]:checked').value;
-    let kind = choice === "auto" ? forcedKind : choice;
-    if (!kind) kind = detectSubsystem(files[0].name, new Uint8Array(files[0].buffer.slice(0, 2048)));
-    if (!kind) throw new Error("Could not identify the subsystem — pick one above.");
-    if ((kind === "Door" || kind === "ACV") && files.length > 1) {
-      files = files.slice(0, 1);
+    const groups = new Map();
+    const unknown = [];
+    for (const f of files) {
+      const detected = await detect(f);
+      const kind = detected || hint;
+      if (!kind) { unknown.push(f.name); continue; }
+      if (detected && hint && detected !== hint) notes.push(`${f.name} was recognised as ${SYSTEMS[detected].title} data.`);
+      if (!groups.has(kind)) groups.set(kind, []);
+      groups.get(kind).push(f);
     }
-    setStatus(`Analysing ${files.length === 1 ? files[0].name : `${files.length} files`}…`);
-    const payload = await runWorker(kind, files);
-    const nodes = RENDER[kind](payload);
-    results.replaceChildren(choice === "auto" ? h("p", { class: "detected" }, `Detected: ${kind}`) : "", ...nodes);
+    if (unknown.length) notes.push(`Unrecognised: ${unknown.join(", ")}. Open the subsystem page and upload from there.`);
+    const done = [];
+    for (const kind of KINDS) {
+      let group = groups.get(kind);
+      if (!group) continue;
+      group.sort((a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name));
+      if (SINGLE_FILE.has(kind) && group.length > 1) {
+        notes.push(`${SYSTEMS[kind].title} takes one file. Used ${group[0].name}.`);
+        group = group.slice(0, 1);
+      }
+      const label = `${SYSTEMS[kind].title}${group.length > 1 ? ` (${group.length} files)` : ""}`;
+      setStatus(`${label}: starting`);
+      const busyEls = [...document.querySelectorAll(`[data-kind="${SYSTEMS[kind].key}"]`)];
+      busyEls.forEach((el) => el.classList.add("working"));
+      try {
+        const payload = await runWorker(kind, group, label);
+        session.set(kind, { payload, files: group.map((f) => f.name), at: now() });
+        tabOf.delete(kind);
+        done.push(kind);
+      } catch (err) {
+        notes.push(`${SYSTEMS[kind].title}: ${friendly(err.message)}`);
+        if (worker) { worker.terminate(); worker = null; }
+      } finally {
+        busyEls.forEach((el) => el.classList.remove("working"));
+      }
+    }
     setStatus("");
-  } catch (err) {
-    setStatus(err.message, { error: true });
-    if (worker) { worker.terminate(); worker = null; }
+    // One result opens its page directly; a batch lands on the overview with a single summary.
+    if (done.length === 1) {
+      const v = viewOf(done[0]);
+      toast([levelChip(v.level), h("b", {}, SYSTEMS[done[0]].title), h("span", {}, v.headline)]);
+    } else if (done.length > 1) {
+      const urgent = done.filter((k) => LEVELS[viewOf(k).level].rank >= 2).length;
+      toast([icon("ok", 16), h("b", {}, `${done.length} subsystems analysed`), h("span", {}, urgent ? `${urgent} need action` : "no action needed")]);
+    }
+    if (done.length === 1) go(SYSTEMS[done[0]].key);
+    else if (done.length > 1) go("overview");
+    else render();
   } finally {
-    results.classList.remove("stale");
     busy = false;
-    document.querySelectorAll(".samples button").forEach((b) => { b.disabled = false; });
+    document.body.classList.remove("busy");
   }
 }
 
-async function readFiles(fileList) {
-  const files = await Promise.all([...fileList].map(async (f) => ({ name: f.name, buffer: await f.arrayBuffer() })));
-  files.sort((a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name));
-  return files;
+/** Views are built once per result; panels they open are bound to the shared panel. */
+function viewOf(kind) {
+  const e = session.get(kind);
+  if (!e.view) e.view = VIEWS[kind](e.payload, { openPanel });
+  return e.view;
 }
 
+// ----------------------------------------------------------- routing ----
+function go(r) {
+  if (location.hash !== `#/${r}`) location.hash = `#/${r}`;
+  else render();
+}
+window.addEventListener("hashchange", () => { closePanel(); closeMenu(); render(); });
+
+function currentRoute() {
+  const r = location.hash.replace(/^#\/?/, "") || "overview";
+  return ["overview", "benchmark", "help"].includes(r) || kindByKey(r) ? r : "overview";
+}
+
+function render() {
+  route = currentRoute();
+  const kind = kindByKey(route);
+  renderMenu();
+  renderCrumbs(kind);
+  hideTooltip();
+  const page = route === "overview" ? overviewPage() : route === "benchmark" ? benchmarkPage() : route === "help" ? helpPage() : systemPage(kind);
+  content.replaceChildren(...[notes.length ? noticeBox() : null, page].filter(Boolean));
+  enhance(content);
+  window.scrollTo(0, 0);
+}
+
+function noticeBox() {
+  return h("div", { class: "notice", role: "note" }, icon("info", 16),
+    h("div", {}, notes.map((m) => h("p", {}, m))),
+    h("button", { type: "button", class: "link", onclick: () => { notes = []; render(); } }, "Dismiss"));
+}
+
+// ------------------------------------------------------------- menu ----
+function renderMenu() {
+  const item = (r, label, iconName, extra) => h("a", { href: `#/${r}`, class: "menu-item", "aria-current": route === r ? "page" : null },
+    icon(iconName, 18), h("span", {}, label), extra || null);
+  const dot = (kind) => (session.has(kind)
+    ? h("i", { class: `dot sev-${viewOf(kind).level}`, title: LEVELS[viewOf(kind).level].label }) : null);
+  $("#menu").replaceChildren(
+    item("overview", "Overview", "grid"),
+    h("div", { class: "menu-label" }, "Subsystems"),
+    ...KINDS.map((k) => item(SYSTEMS[k].key, SYSTEMS[k].title, k, dot(k))),
+    h("div", { class: "menu-label" }, "Model"),
+    item("benchmark", "Benchmark", "chart"),
+    item("help", "Help", "help"));
+
+  const n = session.size;
+  $("#export-card").replaceChildren(
+    h("div", { class: "side-card-head" }, h("b", {}, "Submission"), info("Zips one *_predictions.csv per analysed subsystem, at the top level of predictions.zip.")),
+    h("div", { class: "meter" }, h("i", { style: `width:${(n / 4) * 100}%` })),
+    h("div", { class: "side-card-sub" }, `${n} of 4 subsystems analysed`),
+    button("predictions.zip", { kind: "primary block", iconName: "download", onclick: downloadZip, attrs: { disabled: n ? null : true, id: "zip-report" } }),
+    button("Print report", { kind: "block", iconName: "print", onclick: () => printReport(KINDS.filter((k) => session.has(k))), attrs: { disabled: n ? null : true, id: "print-report" } }));
+}
+
+function renderCrumbs(kind) {
+  const label = kind ? SYSTEMS[kind].title : { overview: "Overview", benchmark: "Benchmark", help: "Help" }[route];
+  $("#crumbs").replaceChildren(h("a", { href: "#/overview" }, "Dashboard"), h("span", { class: "sep", "aria-hidden": "true" }, "›"), h("span", { "aria-current": "page" }, label));
+}
+
+const side = $("#side");
+const toggle = $("#menu-toggle");
+function closeMenu() { side.classList.remove("open"); toggle.setAttribute("aria-expanded", "false"); }
+toggle.addEventListener("click", () => {
+  const open = !side.classList.contains("open");
+  side.classList.toggle("open", open);
+  toggle.setAttribute("aria-expanded", String(open));
+});
+
+// ------------------------------------------------------------ pages ----
+function sampleButton(key, label = "Sample") {
+  return h("button", { type: "button", class: "btn small", "data-sample": key, onclick: (e) => { e.stopPropagation(); loadSample(key); } }, icon("sample", 14), label);
+}
+function uploadButton(kind, label = "Upload") {
+  return h("button", { type: "button", class: "btn small", onclick: (e) => { e.stopPropagation(); pickFiles(kind); } }, icon("upload", 14), label);
+}
+
+function overviewPage() {
+  const tiles = KINDS.map((k) => {
+    const s = SYSTEMS[k];
+    const e = session.get(k);
+    const v = e ? viewOf(k) : null;
+    const tile = h("article", { class: `tile${e ? " done" : ""}`, "data-kind": s.key },
+      h("div", { class: "tile-head" },
+        h("span", { class: "tile-icon" }, icon(k, 18)),
+        h("div", { class: "tile-name" }, h("b", {}, s.title), h("small", {}, s.full)),
+        info(`${s.what} Input: ${s.needs}.`)),
+      e ? [
+        h("div", { class: "tile-row" }, h("span", { class: "tile-value" }, v.tile.value), levelChip(v.level)),
+        h("div", { class: "tile-caption" }, v.tile.caption),
+        h("div", { class: "tile-mini" }, v.mini),
+        h("a", { class: "tile-go", href: `#/${s.key}`, "aria-label": `Open ${s.title}` }, icon("arrow", 16)),
+      ] : [
+        h("div", { class: "tile-empty" }, icon("file", 20), h("span", {}, s.needs)),
+        h("div", { class: "tile-actions" }, uploadButton(k), sampleButton(s.key)),
+      ]);
+    if (e) {
+      tile.tabIndex = 0;
+      tile.addEventListener("click", (ev) => { if (!ev.target.closest("button, a")) go(s.key); });
+      tile.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target === tile) go(s.key); });
+    }
+    addDropTarget(tile, k);
+    return tile;
+  });
+
+  const kinds = KINDS.filter((k) => session.has(k)).sort((a, b) => LEVELS[viewOf(b).level].rank - LEVELS[viewOf(a).level].rank);
+  const priority = kinds.length ? card(titled("h3", "Priority", "Analysed subsystems, most urgent first."),
+    h("div", { class: "prio" }, kinds.map((k) => {
+      const v = viewOf(k);
+      return h("a", { class: "prio-row", href: `#/${SYSTEMS[k].key}` },
+        levelChip(v.level),
+        h("b", {}, SYSTEMS[k].title),
+        h("span", { class: "prio-head" }, v.headline),
+        h("span", { class: "prio-next" }, v.actions[0]),
+        icon("arrow", 16));
+    }))) : null;
+
+  const drop = h("button", { type: "button", class: "dropzone", onclick: () => pickFiles(null) },
+    icon("upload", 18), h("span", {}, h("b", {}, "Drop files anywhere"), " or browse. Mixed subsystems are sorted automatically."));
+
+  return h("div", { class: "page", "data-state": session.size ? "done" : null },
+    h("div", { class: "page-head" }, h("h1", {}, "Overview")),
+    h("div", { class: "tiles" }, tiles),
+    priority,
+    drop);
+}
+
+function systemPage(kind) {
+  const s = SYSTEMS[kind];
+  const e = session.get(kind);
+  const head = h("div", { class: "page-head" },
+    h("div", {}, h("h1", {}, s.title, h("small", {}, s.full)),
+      e ? h("div", { class: "page-meta" }, levelChip(viewOf(kind).level), h("span", {}, `${e.files.length === 1 ? e.files[0] : `${e.files.length} files`} · ${e.at}`)) : null),
+    e ? h("div", { class: "page-actions" },
+      iconButton("download", `Download ${s.csv}`, () => saveBlob(new Blob([viewOf(kind).csv.text], { type: "text/csv" }), viewOf(kind).csv.filename)),
+      iconButton("print", "Print job sheet", () => printReport([kind])),
+      iconButton("upload", "Replace data", () => pickFiles(kind))) : null);
+
+  if (!e) {
+    const empty = h("button", { type: "button", class: "empty", onclick: () => pickFiles(kind) },
+      h("span", { class: "tile-icon big" }, icon(kind, 26)),
+      h("b", {}, "No data yet"),
+      h("span", {}, `${s.needs}. Drop it here or browse.`));
+    addDropTarget(empty, kind);
+    return h("div", { class: "page" }, head, empty, h("div", { class: "center" }, sampleButton(s.key, "Load sample data")));
+  }
+
+  const v = viewOf(kind);
+  const tab = tabOf.get(kind) || "summary";
+  const body = h("div", { class: "tab-body" });
+  const draw = (t) => {
+    tabOf.set(kind, t);
+    hideTooltip();
+    if (t === "summary") {
+      body.replaceChildren(
+        h("div", { class: "stats" }, v.stats),
+        h("div", { class: "split" }, v.main,
+          card(titled("h3", "Actions", `When: ${LEVELS[v.level].when}.`),
+            h("ul", { class: "checklist" }, v.actions.map((a) => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, a))))))));
+    } else if (t === "records") body.replaceChildren(v.records);
+    else body.replaceChildren(...v.signals, h("p", { class: "method" }, icon("info", 14), v.method));
+    enhance(body);
+  };
+  draw(tab);
+  return h("div", { class: "page", "data-state": "done", "data-kind": s.key },
+    head,
+    h("div", { class: "headline-row" },
+      h("p", { class: "headline" }, v.headline),
+      segmented([["summary", "Summary"], ["records", "Records"], ["signals", "Signals"]], tab, draw, "View")),
+    body);
+}
+
+function benchmarkPage() {
+  return h("div", { class: "page" },
+    h("div", { class: "page-head" }, h("h1", {}, "Benchmark", info("Out-of-sample validation scores of the selected models, using each subsystem's official metric."))),
+    h("div", { class: "stats" }, KINDS.map((k) => {
+      const b = HEADLINES[k];
+      return stat({ label: SYSTEMS[k].title, value: b.score.toFixed(3), caption: b.metric, tip: `${b.plain} Scale: ${b.scale}. Validation: ${b.validation}.` });
+    })),
+    card(titled("h3", "All approaches", "Door uses a chronological split (one continuous stream). Rail uses nested CV because class priors are tuned. SHM uses leave-one-out."),
+      table(BENCHMARK.map(([Subsystem, Model, Validation, Metric, Score, Status]) => ({ Subsystem: SYSTEMS[Subsystem].title, Model, Validation, Metric, Score, Status })), [
+        { key: "Subsystem", label: "Subsystem" },
+        { key: "Model", label: "Approach" },
+        { key: "Validation", label: "Validation" },
+        { key: "Metric", label: "Metric" },
+        { key: "Score", label: "Score", num: true, fmt: (v) => v.toFixed(3) },
+        { key: "Status", label: "Status", fmt: (v) => levelChip(v === "selected" ? "ok" : v === "rejected" ? "act" : "watch", v[0].toUpperCase() + v.slice(1)) },
+      ])));
+}
+
+function helpPage() {
+  return h("div", { class: "page" },
+    h("div", { class: "page-head" }, h("h1", {}, "Help")),
+    h("div", { class: "split even" },
+      card("Workflow", h("ol", { class: "steps" },
+        h("li", {}, "Upload on the Overview (any mix of files) or on a subsystem page."),
+        h("li", {}, "Select any item in the Summary visual to open its details."),
+        h("li", {}, "Download the CSV, or predictions.zip from the side menu."))),
+      card("Status", h("ul", { class: "levels" }, Object.keys(LEVELS).map((l) => h("li", {}, levelChip(l), h("span", {}, LEVELS[l].when)))))),
+    card("Inputs", table(KINDS.map((k) => ({ s: SYSTEMS[k].title, full: SYSTEMS[k].full, needs: SYSTEMS[k].needs, csv: SYSTEMS[k].csv })), [
+      { key: "s", label: "Subsystem" }, { key: "full", label: "Full name" }, { key: "needs", label: "Input" }, { key: "csv", label: "Output", fmt: (v) => h("code", {}, v) },
+    ])));
+}
+
+// ------------------------------------------------------------- input ----
 const input = $("#file-input");
+let pickHint = null;
+function pickFiles(kind) { pickHint = kind; input.click(); }
 input.addEventListener("change", async () => {
-  if (input.files.length) await analyse(await readFiles(input.files));
+  if (input.files.length) await analyse([...input.files].map((f) => ({ name: f.name, blob: f })), pickHint);
   input.value = "";
 });
+$("#upload-btn").addEventListener("click", () => pickFiles(kindByKey(route) || null));
 
-const zone = $("#dropzone");
-zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("dragging"); });
-zone.addEventListener("dragleave", () => zone.classList.remove("dragging"));
-zone.addEventListener("drop", async (e) => {
+// Per-element drop targets carry a subsystem hint; anywhere else on the page uses the current page.
+let dropHint = null;
+function addDropTarget(el, kind) {
+  el.addEventListener("dragover", (e) => { e.preventDefault(); dropHint = kind; el.classList.add("drop-on"); });
+  el.addEventListener("dragleave", () => { dropHint = null; el.classList.remove("drop-on"); });
+  el.addEventListener("drop", () => el.classList.remove("drop-on"));
+}
+let depth = 0;
+const overlay = $("#drop-overlay");
+window.addEventListener("dragenter", (e) => { if (e.dataTransfer?.types?.includes("Files")) { depth++; overlay.classList.add("show"); } });
+window.addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) overlay.classList.remove("show"); });
+window.addEventListener("dragover", (e) => { e.preventDefault(); });
+window.addEventListener("drop", async (e) => {
   e.preventDefault();
-  zone.classList.remove("dragging");
-  if (e.dataTransfer.files.length) await analyse(await readFiles(e.dataTransfer.files));
+  depth = 0;
+  overlay.classList.remove("show");
+  const hint = dropHint || kindByKey(route) || null;
+  dropHint = null;
+  if (e.dataTransfer.files.length) await analyse([...e.dataTransfer.files].map((f) => ({ name: f.name, blob: f })), hint);
 });
 
-document.querySelectorAll("[data-sample]").forEach((btn) => btn.addEventListener("click", async () => {
-  const { kind, path } = SAMPLES[btn.dataset.sample];
-  document.querySelector('input[name="kind"][value="auto"]').checked = true;
-  setStatus(`Downloading sample ${path.split("/").pop()}…`);
+async function loadSample(key) {
+  if (busy) return;
+  const { kind, path } = SAMPLES[key];
+  const name = path.split("/").pop();
+  setStatus(`Downloading sample ${name}`);
   try {
     const res = await fetch(SAMPLE_BASE + path);
     if (!res.ok) throw new Error(`Sample download failed (${res.status}).`);
-    await analyse([{ name: path.split("/").pop(), buffer: await res.arrayBuffer() }], kind);
+    await analyse([{ name, blob: await res.blob() }], kind);
   } catch (err) {
     setStatus(err.message, { error: true });
   }
-}));
+}
 
-// ------------------------------------------------------- benchmark ----
-$("#bench-table").replaceWith(table(
-  BENCHMARK.map(([Subsystem, Model, Validation, Metric, Score, Status]) => ({ Subsystem, Model, Validation, Metric, Score, Status })),
-  [
-    { key: "Subsystem", label: "Subsystem" },
-    { key: "Model", label: "Model" },
-    { key: "Validation", label: "Validation" },
-    { key: "Metric", label: "Metric" },
-    { key: "Score", label: "Score", num: true, fmt: fmt(3) },
-    { key: "Status", label: "Status", pill: (v) => (v === "selected" ? "ok" : v === "rejected" ? "bad" : "") },
-  ],
-).querySelector("table"));
+// ----------------------------------------------------- zip and print ----
+function downloadZip() {
+  const files = KINDS.filter((k) => session.has(k)).map((k) => ({ name: viewOf(k).csv.filename, text: viewOf(k).csv.text }));
+  if (files.length) saveBlob(makeZip(files), "predictions.zip");
+}
+
+function printReport(kinds) {
+  if (!kinds.length) return;
+  const worst = kinds.reduce((a, k) => Math.max(a, LEVELS[viewOf(k).level].rank), 0);
+  $("#print-root").replaceChildren(
+    h("header", { class: "p-head" },
+      h("div", {}, h("h1", {}, kinds.length === 1 ? `${SYSTEMS[kinds[0]].title} job sheet` : "Condition report"),
+        h("p", {}, `TrainWhisper · ${now()}`)),
+      h("div", {}, "Overall: ", levelChip(Object.keys(LEVELS).find((l) => LEVELS[l].rank === worst)))),
+    ...kinds.map((k) => {
+      const v = viewOf(k);
+      const { files, at } = session.get(k);
+      return h("section", { class: `p-sec sev-${v.level}` },
+        h("div", { class: "p-sec-head" }, h("h2", {}, `${SYSTEMS[k].title} (${SYSTEMS[k].full})`), levelChip(v.level)),
+        h("p", { class: "p-meta" }, `${files.length === 1 ? files[0] : `${files.length} files`} · analysed ${at} · ${LEVELS[v.level].when}`),
+        h("p", { class: "p-headline" }, v.headline),
+        h("ul", { class: "p-check" }, v.actions.map((t) => h("li", {}, t))),
+        v.print.rows.length ? [h("h3", {}, v.print.note), h("table", {}, h("thead", {}, h("tr", {}, v.print.columns.map((c) => h("th", {}, c)))),
+          h("tbody", {}, v.print.rows.map((r) => h("tr", {}, r.map((c) => h("td", {}, c))))))] : h("p", {}, v.print.note),
+        h("div", { class: "p-sign" }, h("span", {}, "Actioned by: ____________________"), h("span", {}, "Date: __________"), h("span", {}, "Work order: __________")));
+    }));
+  document.body.classList.add("printing");
+  const done = () => { document.body.classList.remove("printing"); window.removeEventListener("afterprint", done); };
+  window.addEventListener("afterprint", done);
+  window.print();
+}
+
+// ------------------------------------------------------------- start ----
+$("#local-note").replaceChildren(icon("lock", 14), h("span", {}, "Local processing"), info("Files are analysed in this browser and never leave the computer."));
+render();

@@ -114,7 +114,7 @@ export function segmentedLine(container, { cycles, yLabel, ariaLabel, describe }
       const x = sx(c.points[0][0]);
       text(svg, x, H - m.b + 16, String(i + 1), { "text-anchor": "middle" });
     });
-    text(svg, (m.l + W - m.r) / 2, H - 4, "Door cycle (idle gaps between cycles removed)", { class: "axis-title", "text-anchor": "middle" });
+    text(svg, (m.l + W - m.r) / 2, H - 4, "Cycle (idle time removed)", { class: "axis-title", "text-anchor": "middle" });
 
     for (const c of cycles) {
       const d = c.points.map((p, i) => `${i ? "L" : "M"}${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join("");
@@ -212,7 +212,7 @@ export function bars(container, { labels, series, yLabel, xLabel, log = false, h
         if (!Number.isFinite(v) || (log && v <= 0)) return;
         const x = m.l + band * i + (band - inner) / 2 + si * (bw + gap);
         const fill = s.colors ? s.colors[i] : s.color;
-        const p = el("path", { d: barPath(x, Math.max(1, bw), base, sy(v)), fill, class: "mark" }, svg);
+        const p = el("path", { d: barPath(x, Math.max(1, bw), base, sy(v)), fill, class: "mark bar-grow", style: `--i:${i}` }, svg);
         marks.push(p);
         // hit target: full band height for this bar, wider than the mark
         const h = el("rect", { x: x - gap, y: m.t, width: bw + gap * 2, height: H - m.t - m.b, class: "hit", tabindex: 0 }, svg);
@@ -230,5 +230,71 @@ export function bars(container, { labels, series, yLabel, xLabel, log = false, h
       });
     });
     if (!log) el("line", { x1: m.l, x2: W - m.r, y1: base, y2: base, class: "baseline" }, svg);
+  });
+}
+
+/**
+ * Overlaid line series on a shared numeric x axis, with a crosshair that reads every series.
+ * series: [{ name, color, points: [[x, y]], dash? }]
+ */
+export function lines(container, { series, xLabel, yLabel, ariaLabel, height = 240, fmtX = (v) => v.toFixed(1), fmtY = (v) => v.toFixed(0) }) {
+  const all = series.flatMap((s) => s.points);
+  let xMax = 0;
+  let yMax = 0;
+  for (const [x, y] of all) { xMax = Math.max(xMax, x); yMax = Math.max(yMax, y); }
+  const xTicks = niceTicks(0, xMax, 6);
+  const yTicks = niceTicks(0, yMax, 4);
+  const xTop = xTicks[xTicks.length - 1];
+  const yTop = yTicks[yTicks.length - 1];
+
+  return responsive(container, height, (svg, W, H) => {
+    svg.setAttribute("aria-label", ariaLabel);
+    const m = { l: 56, r: 12, t: 8, b: 40 };
+    const sx = (x) => m.l + (x / xTop) * (W - m.l - m.r);
+    const sy = (y) => H - m.b - (y / yTop) * (H - m.t - m.b);
+    for (const t of yTicks) {
+      el("line", { x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), class: t === 0 ? "baseline" : "grid" }, svg);
+      text(svg, m.l - 6, sy(t) + 4, fmtTick(t), { "text-anchor": "end" });
+    }
+    for (const t of xTicks) text(svg, sx(t), H - m.b + 16, fmtTick(t), { "text-anchor": "middle" });
+    text(svg, 14, (m.t + H - m.b) / 2, yLabel, { class: "axis-title", "text-anchor": "middle", transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` });
+    text(svg, (m.l + W - m.r) / 2, H - 4, xLabel, { class: "axis-title", "text-anchor": "middle" });
+
+    for (const s of series) {
+      const d = s.points.map(([x, y], i) => `${i ? "L" : "M"}${sx(x).toFixed(1)},${sy(y).toFixed(1)}`).join("");
+      // Solid series trace themselves in; dashed reference lines fade in.
+      el("path", {
+        d, fill: "none", stroke: s.color, "stroke-width": s.dash ? 1.75 : 2.25, "stroke-dasharray": s.dash || "none", "stroke-linejoin": "round",
+        ...(s.dash ? { class: "line-fade" } : { class: "line-draw", pathLength: 1 }),
+      }, svg);
+    }
+
+    const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" }, svg);
+    const dots = series.map((s) => el("circle", { r: 4, fill: "var(--surface)", stroke: s.color, "stroke-width": 2, visibility: "hidden" }, svg));
+    const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, class: "hit" }, svg);
+    const nearest = (pts, x) => {
+      let lo = 0;
+      let hi = pts.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (pts[mid][0] < x) lo = mid; else hi = mid; }
+      return Math.abs(pts[lo][0] - x) < Math.abs(pts[hi][0] - x) ? pts[lo] : pts[hi];
+    };
+    hit.addEventListener("pointermove", (evt) => {
+      const box = svg.getBoundingClientRect();
+      const x = (((evt.clientX - box.left) * (W / box.width) - m.l) / (W - m.l - m.r)) * xTop;
+      cross.setAttribute("x1", sx(x)); cross.setAttribute("x2", sx(x)); cross.setAttribute("visibility", "visible");
+      const linesOut = [];
+      series.forEach((s, k) => {
+        if (!s.points.length || x > s.points[s.points.length - 1][0] + xTop * 0.02) { dots[k].setAttribute("visibility", "hidden"); return; }
+        const p = nearest(s.points, x);
+        dots[k].setAttribute("cx", sx(p[0])); dots[k].setAttribute("cy", sy(p[1])); dots[k].setAttribute("visibility", "visible");
+        linesOut.push(`${s.name}: ${fmtY(p[1])}`);
+      });
+      showTooltip(evt, fmtX(x), linesOut);
+    });
+    hit.addEventListener("pointerleave", () => {
+      cross.setAttribute("visibility", "hidden");
+      dots.forEach((d) => d.setAttribute("visibility", "hidden"));
+      hideTooltip();
+    });
   });
 }

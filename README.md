@@ -4,7 +4,7 @@ This repository contains the datasets, problem statements, reference materials, 
 
 ## Overview
 
-The workspace is divided into three problem-statement tracks, each with its own brief, data assets, and reference materials. The goal is to give participants a ready-to-use starting point for building solutions to real transport and rail challenges in Singapore.
+This team repository works on **Problem Statement 3: Train Condition Monitoring**. The PS1 and PS2 tracks have been removed.
 
 ## Repository Structure
 
@@ -12,49 +12,16 @@ The workspace is divided into three problem-statement tracks, each with its own 
 NebulaX-Hackathon-ProblemStatement/
 ├── README.md                           # Project overview and navigation guide
 ├── LTA_DataMall_API_User_Guide.pdf     # LTA DataMall API documentation
-├── PS1/                                # Problem Statement 1
-│   ├── PS1_README.md                  # Challenge brief and rules
-│   ├── 01_data/                       # Input datasets
-│   ├── 02_references/                 # Network/reference diagrams
-│   └── 03_submission_sample/          # Sample submission outputs
-├── PS2/                                # Problem Statement 2
-│   ├── PS2_README.md                  # Challenge brief
-│   ├── data/                          # Provided datasets
-│   ├── references/                    # Supporting documents and resources
-│   ├── submission/                    # Submission packaging guidance
-│   └── ...
-├── PS3/                                # Problem Statement 3
-│   ├── 01_Problem_Statement_3_Specifications.md
-│   ├── 02_Datasets/                   # Train/test datasets for each subsystem
-│   ├── 03_References/                 # Info kits and data documentation
-│   ├── 04_Example_Submission/         # Example prediction files
-│   ├── Door subproblem/              # Door-related exploratory work
-│   ├── trainwhisper/                 # Modelling and prediction utilities
-│   └── ...
-└── .gitignore
+└── PS3/                                # Problem Statement 3
+    ├── 01_Problem_Statement_3_Specifications.md
+    ├── 02_Datasets/                   # Train/test datasets for each subsystem
+    ├── 03_References/                 # Info kits and data documentation
+    ├── 04_Example_Submission/         # Example prediction files
+    ├── Door subproblem/               # Door-related exploratory work
+    └── trainwhisper/                  # The app (web UI + models) and Python pipeline
 ```
 
-## Problem Statements
-
-### PS1: Railway Track Access Optimisation
-
-Focus: planning safe and feasible rail track access windows while respecting rules, constraints, and deadlines.
-
-Start here:
-- PS1/PS1_README.md
-- PS1/01_data/
-- PS1/03_submission_sample/
-- PS1/02_references/
-
-### PS2: Smart Commuter Companion
-
-Focus: building a commuter-facing solution that helps users plan journeys, react to disruptions, and account for crowding and weather conditions.
-
-Start here:
-- PS2/PS2_README.md
-- PS2/data/
-- PS2/references/
-- PS2/submission/
+## Problem Statement
 
 ### PS3: Train Condition Monitoring
 
@@ -65,7 +32,7 @@ Start here:
 - PS3/02_Datasets/
 - PS3/03_References/
 - PS3/04_Example_Submission/
-- PS3/trainwhisper/
+- PS3/trainwhisper/ (app: see its README)
 
 ## LTA DataMall API
 
