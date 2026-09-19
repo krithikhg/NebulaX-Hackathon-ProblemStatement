@@ -5,6 +5,7 @@ import {
   $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, ring, saveBlob, segmented, stagger, stat, table, titled, toast,
 } from "./ui.js";
 import { hideTooltip, showTooltip } from "./charts.js";
+import { getSelectedStream, refreshStreams } from "./shm_stream.js";
 import { VIEWS } from "./views.js";
 import { makeZip } from "./zip.js";
 
@@ -87,7 +88,7 @@ function setStatus(message, { error = false, done, total } = {}) {
 
 // ------------------------------------------------------------ worker ----
 let worker = null;
-function runWorker(kind, files, label) {
+function runWorker(kind, files, label, extra = {}) {
   if (!worker) worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   return new Promise((resolve, reject) => {
     worker.onmessage = ({ data }) => {
@@ -96,7 +97,7 @@ function runWorker(kind, files, label) {
       else reject(new Error(data.message));
     };
     worker.onerror = (e) => reject(new Error(e.message || "The analysis could not start."));
-    worker.postMessage({ kind, files });
+    worker.postMessage({ kind, files, ...extra });
   });
 }
 
@@ -151,8 +152,11 @@ async function analyse(files, hint) {
       const busyEls = [...document.querySelectorAll(`[data-kind="${SYSTEMS[kind].key}"]`)];
       busyEls.forEach((el) => el.classList.add("working"));
       try {
-        const payload = await runWorker(kind, group, label);
+        // SHM accumulates into a named, persisted stream (see shm_stream.js).
+        const extra = kind === "SHM" ? { stream: getSelectedStream() } : {};
+        const payload = await runWorker(kind, group, label, extra);
         session.set(kind, { payload, files: group.map((f) => f.name), at: now() });
+        if (kind === "SHM") refreshStreams();
         tabOf.delete(kind);
         done.push(kind);
       } catch (err) {

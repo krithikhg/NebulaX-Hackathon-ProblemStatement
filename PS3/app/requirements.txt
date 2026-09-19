@@ -14,3 +14,5 @@ openpyxl==3.1.5
 fastapi==0.141.1
 uvicorn[standard]
 python-multipart
+# Optional: enables persistent cumulative SHM state on Cloud Run (PS3_STATE_BUCKET).
+google-cloud-storage

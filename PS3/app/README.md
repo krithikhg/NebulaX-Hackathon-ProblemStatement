@@ -44,8 +44,14 @@ gcloud run deploy trainwhisper \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --port 8080 --memory 1Gi --cpu 1 --timeout 300
+  --port 8080 --memory 1Gi --cpu 1 --timeout 300 \
+  --set-env-vars PS3_STATE_BUCKET=<your-bucket>   # persistent cumulative SHM state
 ```
+
+Create the bucket once (`gcloud storage buckets create gs://<your-bucket>`) and
+grant the Cloud Run service account object read/write. Without the env var the
+state falls back to an ephemeral local file (fine for a single-instance demo,
+not for autoscaling).
 
 `--source .` builds the `Dockerfile` with Cloud Build and deploys it. The
 service URL is printed on success. (Cloud Run's region is independent of the
@@ -62,6 +68,7 @@ uvicorn server:app --host 0.0.0.0 --port 8080   # http://localhost:8080
 
 ```
 server.py         FastAPI: serves public/ and POST /api/predict/{kind}
+state_store.py    persistent cumulative SHM state (GCS bucket or local JSON)
 Dockerfile        Cloud Run image
 common.py         shared parsing helpers (door timestamps, ACV schema discovery)
 door.py           segmentation + classifier
@@ -74,6 +81,7 @@ evaluate.py       local copies of all four official metrics
 public/
   index.html, styles.css
   js/app.js          shell: routing, side menu, uploads, detail panel, zip, print
+  js/shm_stream.js   cumulative per-stream SHM dashboard (self-contained)
   js/views.js        one view per subsystem: payload -> stats, visual, actions, records, panels
   js/ui.js           shared UI pieces: status levels, names, info tips, tables, formatting
   js/util.js         toCsv / pyFloat / remainingLife helpers used by the views
@@ -95,7 +103,24 @@ CSV columns must stay as the spec requires (`Normal` / `Abnormal resistance`,
 | Door | `{ name, result: [{ start_time, end_time, prediction, mean_current_mA, peak_current_mA }], cycles: [{ points: [[idx, mA, epochMs]], abnormal, operation, t0, duration_s }] }` |
 | ACV | `{ name, ranked: [{ car, score, cabin_temp_dev_C }], samples, train, window }` (most likely first) |
 | Rail | `{ result: [{ file_id, prediction, confidence, speed_m_s }], bands: [{ file_id, speed, stationary, side1[], side2[] }], bandLabels }` |
-| SHM | `{ result: [{ file_id, prediction }], detail: [{ file_id, samples, cycles, peak_amplitude, histogram }], fit: { m, C, amplitude_cutoff, loo_mape } }` |
+| SHM | `{ result: [{ file_id, prediction }], detail: [{ file_id, samples, cycles, peak_amplitude, histogram }], fit: { m, C, amplitude_cutoff, loo_mape }, state? }` |
+
+`state` (SHM only) is returned when the request carries a `stream` form field:
+`{ stream, D, n_segments, n_samples, rate, updated_at, history }` — the running
+cumulative Miner damage for that stream.
+
+### Cumulative SHM state endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/shm/state` | every stream's persisted state (fleet view) |
+| `GET` | `/api/shm/state/one?stream=<label>` | one stream |
+| `POST` | `/api/shm/state/reset` | reset one stream (`stream` form field) or all |
+
+State is persisted by `state_store.py` to **Cloud Storage** when
+`PS3_STATE_BUCKET` is set (recommended on Cloud Run), otherwise to a local JSON
+directory (`PS3/app/state/`). The frontend accumulates per **stream label**
+(free text, e.g. `Train 03 / bogie frame`) chosen in the SHM view.
 
 `confidence` is the model's probability for its chosen class (0–1); the UI shows
 high (≥ 0.9), medium (≥ 0.7) or low certainty. After retraining, update the
@@ -174,6 +199,14 @@ features — an analytic single `(m, k)` pair (m = 5.0, a textbook welded-steel 
 exponent) and a physics-informed Ridge over an exponent bank that learns the S-N
 curve shape. The bank Ridge is shipped; 8-fold CV (5 seeds) gives **0.994**
 (0.55% MAPE) versus 0.991 for the analytic fit.
+
+The app additionally tracks **cumulative** damage per stream (a train /
+measurement point, free-text label). Miner's rule is additive, so the state is a
+tiny Markov summary (`D`, `n_segments`, `n_samples`, `rate`) persisted by
+`state_store.py` (Cloud Storage, or local JSON); the SHM view shows the running
+D, segments to D = 1 and a fleet table, and `subsystems/shm/stream_watch.py`
+ingests a folder of segments automatically with threshold alerts. The submission
+CSV stays **per segment**.
 
 ## Known gaps / next steps
 

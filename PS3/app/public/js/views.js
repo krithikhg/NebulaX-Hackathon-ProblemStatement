@@ -3,6 +3,7 @@
 //     records: Node, signals: Node[], method, csv: { filename, text }, print: { columns, rows, note } }
 // app.js lays these out identically for every subsystem.
 import { bars, lines, segmentedLine } from "./charts.js";
+import { mountShmStream } from "./shm_stream.js";
 import { pyFloat, remainingLife, toCsv } from "./util.js";
 import {
   card, certainty, certaintyCell, clock, day, excelDate, fmt, h, int, legend, levelChip, segmented, signed, stat, table, titled,
@@ -429,11 +430,14 @@ export function shmView({ result, detail, fit }, { openPanel }) {
     });
   };
 
-  const main = card(titled("h3", "Cumulative damage D", "Bands: below 0.25 Normal, 0.25 to 0.5 Monitor, 0.5 to 0.8 Plan, 0.8 and above Act now. These are team defaults, not an LTA standard."),
-    h("div", { class: `gauges${n > 10 ? " scroll" : ""}` }, sorted.map((r) => h("button", {
-      type: "button", class: "gauge-row", onclick: () => open(r.i), "aria-label": `${r.file_id}, D ${r.prediction.toFixed(3)}, ${r.level}`,
-    }, h("span", { class: "g-name" }, r.file_id), gauge(r), h("span", { class: "g-val" }, r.prediction.toFixed(3))))),
-    legend([["< 0.25", "sw-ok"], ["0.25 to 0.5", "sw-watch"], ["0.5 to 0.8", "sw-plan"], ["≥ 0.8", "sw-act"]]));
+  const main = h("div", { class: "stack" },
+    card(titled("h3", "Segment damage d", "Bands: below 0.25 Normal, 0.25 to 0.5 Monitor, 0.5 to 0.8 Plan, 0.8 and above Act now. These are team defaults, not an LTA standard."),
+      h("div", { class: `gauges${n > 10 ? " scroll" : ""}` }, sorted.map((r) => h("button", {
+        type: "button", class: "gauge-row", onclick: () => open(r.i), "aria-label": `${r.file_id}, D ${r.prediction.toFixed(3)}, ${r.level}`,
+      }, h("span", { class: "g-name" }, r.file_id), gauge(r), h("span", { class: "g-val" }, r.prediction.toFixed(3))))),
+      legend([["< 0.25", "sw-ok"], ["0.25 to 0.5", "sw-watch"], ["0.5 to 0.8", "sw-plan"], ["≥ 0.8", "sw-act"]])),
+    // Cumulative, per-stream monitoring (persisted server-side).
+    mountShmStream());
 
   const cols = [
     { key: "file_id", label: "File" },

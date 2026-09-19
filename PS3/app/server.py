@@ -21,13 +21,14 @@ import tempfile
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 
 import acv
 import door
 import rail
 import shm
+import state_store
 from common import HERE
 
 PUBLIC = os.path.join(HERE, "public")
@@ -145,13 +146,13 @@ def rail_payload(path: str, name: str) -> dict:
     }
 
 
-def shm_payload(path: str, name: str) -> dict:
+def shm_payload(path: str, name: str, stream: str | None = None) -> dict:
     signal = shm.load_signal(path)
     value, (ranges, _, count) = shm.predict_signal(signal)
     const = shm.constants()
     amplitude = ranges / 2.0
     cycles = np.column_stack([amplitude, count]) if ranges.size else np.zeros((0, 2))
-    return {
+    payload = {
         "result": [{"file_id": name, "prediction": _num(value)}],
         "detail": [{
             "file_id": name,
@@ -167,6 +168,10 @@ def shm_payload(path: str, name: str) -> dict:
             "loo_mape": const.get("bank_cv_mape", const.get("mape")),
         },
     }
+    # Cumulative, per-stream Miner damage: add this segment to the running state.
+    if stream:
+        payload["state"] = state_store.update(stream, value, len(signal), name)
+    return payload
 
 
 _PAYLOADS = {
@@ -184,13 +189,16 @@ def health():
 
 
 @app.post("/api/predict/{kind}")
-async def predict(kind: str, file: UploadFile = File(...)):
+async def predict(kind: str, file: UploadFile = File(...),
+                  stream: str | None = Form(None)):
     builder = _PAYLOADS.get(kind)
     if builder is None:
         raise HTTPException(status_code=404, detail=f"Unknown subsystem: {kind}")
     name = os.path.basename(file.filename or "input")
     path = _save(file)
     try:
+        if kind == "shm":
+            return builder(path, name, stream)
         return builder(path, name)
     except ValueError as exc:            # user-facing input problems
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -198,6 +206,24 @@ async def predict(kind: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
     finally:
         os.unlink(path)
+
+
+# ------------------------------------------------- cumulative SHM state ----
+@app.get("/api/shm/state")
+def shm_states():
+    """Every stream's cumulative state (for the fleet view)."""
+    return {"streams": state_store.list_states()}
+
+
+@app.get("/api/shm/state/one")
+def shm_state_one(stream: str = Query(...)):
+    return state_store.load(stream)
+
+
+@app.post("/api/shm/state/reset")
+def shm_state_reset(stream: str | None = Form(None)):
+    """Reset one stream (form field ``stream``) or all of them (omitted)."""
+    return {"reset": state_store.reset(stream)}
 
 
 app.mount("/", StaticFiles(directory=PUBLIC, html=True), name="static")

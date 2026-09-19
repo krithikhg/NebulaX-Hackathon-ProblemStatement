@@ -20,7 +20,11 @@ Thumbs.db
 *.pkl
 *.h5
 *.keras
-PS3/subsystems/**/cache/
-PS3/subsystems/**/.cache/
+PS3/solution/**/cache/
 *.npy
 *.npz
+
+# SHM runtime state / stream logs (regenerate locally, or persist in GCS)
+PS3/subsystems/shm/state/
+PS3/subsystems/shm/predictions/shm_stream_predictions.csv
+PS3/app/state/

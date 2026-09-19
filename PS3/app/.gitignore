@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 cache/
 .vercel/
+
+# Local fallback store for cumulative SHM state (GCS is used on Cloud Run).
+state/

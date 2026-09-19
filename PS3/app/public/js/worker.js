@@ -10,9 +10,10 @@ const progress = (done, total, label) => postMessage({ type: "progress", done, t
 
 // One request per file: keeps each upload comfortably under Cloud Run's 32 MB
 // request limit (a rail recording alone is ~17 MB), and lets progress step.
-async function post(kind, file) {
+async function post(kind, file, extra = {}) {
   const body = new FormData();
   body.append("file", file.blob, file.name);
+  for (const [k, v] of Object.entries(extra || {})) if (v) body.append(k, v);
   const res = await fetch(`/api/predict/${kind}`, { method: "POST", body });
   if (!res.ok) {
     let message = `Analysis failed (${res.status})`;
@@ -52,20 +53,22 @@ const handlers = {
     return { result, bands, bandLabels };
   },
 
-  async SHM(files) {
+  async SHM(files, data = {}) {
     const result = [];
     const detail = [];
     let fit = null;
+    let state = null;
     for (let i = 0; i < files.length; i++) {
       progress(i, files.length, files.length > 1
         ? `analysing ${i + 1} of ${files.length}`
         : "rainflow counting");
-      const payload = await post("shm", files[i]);
+      const payload = await post("shm", files[i], { stream: data.stream });
       result.push(...payload.result);
       detail.push(...payload.detail);
       fit = payload.fit;
+      state = payload.state || state;
     }
-    return { result, detail, fit };
+    return { result, detail, fit, state };
   },
 };
 
@@ -73,7 +76,7 @@ onmessage = async ({ data }) => {
   try {
     const handler = handlers[data.kind];
     if (!handler) throw new Error(`Unknown subsystem: ${data.kind}`);
-    postMessage({ type: "result", kind: data.kind, payload: await handler(data.files) });
+    postMessage({ type: "result", kind: data.kind, payload: await handler(data.files, data) });
   } catch (err) {
     postMessage({ type: "error", message: err && err.message ? err.message : String(err) });
   }

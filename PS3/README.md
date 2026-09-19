@@ -129,6 +129,8 @@ cd PS3/subsystems
 ../../.venv/bin/python -m shm.predict      # writes shm/predictions/shm_predictions.csv
 ../../.venv/bin/python -m shm.benchmark    # physics vs ML vs residual comparison
 ../../.venv/bin/python -m shm.report_figs  # figures -> shm/figures/
+../../.venv/bin/python -m shm.ablate_stream                 # online vs batch counter
+../../.venv/bin/python -m shm.stream_watch --input <dir> --stream "Train 01 / bogie"
 ```
 
 ### Method
@@ -194,6 +196,18 @@ additive label noise and that mean-stress corrections make it worse.
   former made results worse, the latter changed nothing, confirming the labels
   use a plain `rangeᵐ` sum.
 * **Detrending** each series before counting — worsened MAPE (0.8% → 1.6%).
+
+### Cumulative / real-time monitoring
+
+Beyond the per-segment score, the solution tracks **cumulative** Miner damage per
+monitored stream (train / measurement point, free-text label). Miner's rule is
+additive, so the running state is a tiny Markov summary
+(`D`, `n_segments`, `n_samples`, `rate`) persisted in Cloud Storage (or a local
+file). The app shows a live D / remaining-life dashboard with a fleet view, and
+`shm.stream_watch` auto-ingests a folder of segments with threshold alerts.
+A single-pass streaming counter is implemented and ablation-tested
+(`shm.ablate_stream`); it trades accuracy for bounded memory, so the exact
+per-segment counter remains the shipped model. See `shm/METHOD.md` §6.
 
 ## Submission notes
 
