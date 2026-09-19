@@ -39,6 +39,7 @@ const PATHS = {
   menu: "M4 6h16M4 12h16M4 18h16",
   lock: "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4",
   file: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6",
+  home: "M3 11 12 3l9 8M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5",
 };
 
 export function icon(name, size = 20) {
@@ -144,12 +145,33 @@ export function card(title, ...body) {
     title ? (typeof title === "string" ? h("h3", { class: "card-title" }, title) : title) : null, ...body);
 }
 
-/** MUI-style stat card: label, big value, optional chip and caption. */
-export function stat({ label, value, chip, caption, tip }) {
-  return h("div", { class: "stat" },
+/** Stat card: label, big value, optional chip, caption and icon badge. */
+export function stat({ label, value, chip, caption, tip, iconName }) {
+  return h("div", { class: `stat${iconName ? " has-ico" : ""}` },
     h("div", { class: "stat-label" }, label, tip ? info(tip) : null),
     h("div", { class: "stat-row" }, h("span", { class: "stat-value" }, value), chip || null),
-    caption ? h("div", { class: "stat-caption" }, caption) : null);
+    caption ? h("div", { class: "stat-caption" }, caption) : null,
+    iconName ? h("span", { class: "stat-ico" }, icon(iconName, 20)) : null);
+}
+
+let ringSeq = 0;
+/** Circular progress with a gradient stroke. fraction is 0..1; centre is any node(s). */
+export function ring(fraction, centre, { size = 180, color = "var(--brand)" } = {}) {
+  const id = `ring-grad-${++ringSeq}`;
+  const r = 44;
+  const c = 2 * Math.PI * r;
+  const off = c * (1 - Math.min(1, Math.max(0, fraction)));
+  const node = h("div", { class: "ring", style: `width:${size}px;height:${size}px` });
+  node.innerHTML = `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <defs><linearGradient id="${id}" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" style="stop-color:${color};stop-opacity:.1"/><stop offset="1" style="stop-color:${color}"/>
+    </linearGradient></defs>
+    <circle class="ring-track" cx="50" cy="50" r="${r}" stroke-width="7"/>
+    <circle class="ring-arc" cx="50" cy="50" r="${r}" stroke-width="7" stroke="url(#${id})" transform="rotate(-90 50 50)"
+      stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" style="--c:${c.toFixed(2)}"${fraction > 0 ? "" : ' visibility="hidden"'}/>
+  </svg>`;
+  node.append(h("div", { class: "ring-centre" }, centre));
+  return node;
 }
 
 export function legend(items) {

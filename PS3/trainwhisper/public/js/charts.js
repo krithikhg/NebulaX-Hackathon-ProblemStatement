@@ -1,6 +1,16 @@
 // Small SVG chart kit: a segmented line chart and a bar chart, both with hover tooltips.
 const NS = "http://www.w3.org/2000/svg";
 const tooltip = () => document.getElementById("tooltip");
+let gradSeq = 0;
+
+/** Vertical fade from colour to transparent, for area fills under a line. */
+function areaGradient(svg, color) {
+  const id = `area-${++gradSeq}`;
+  const g = el("linearGradient", { id, x1: 0, y1: 0, x2: 0, y2: 1 }, el("defs", {}, svg));
+  el("stop", { offset: 0, style: `stop-color:${color};stop-opacity:.35` }, g);
+  el("stop", { offset: 1, style: `stop-color:${color};stop-opacity:0` }, g);
+  return `url(#${id})`;
+}
 
 function el(name, attrs = {}, parent) {
   const node = document.createElementNS(NS, name);
@@ -116,9 +126,12 @@ export function segmentedLine(container, { cycles, yLabel, ariaLabel, describe }
     });
     text(svg, (m.l + W - m.r) / 2, H - 4, "Cycle (idle time removed)", { class: "axis-title", "text-anchor": "middle" });
 
+    const fill = areaGradient(svg, "var(--series-1)");
     for (const c of cycles) {
       const d = c.points.map((p, i) => `${i ? "L" : "M"}${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join("");
-      el("path", { d, fill: "none", stroke: "var(--text-2)", "stroke-width": 1.5, "stroke-linejoin": "round" }, svg);
+      const ends = `L${sx(c.points[c.points.length - 1][0]).toFixed(1)},${sy(0)}L${sx(c.points[0][0]).toFixed(1)},${sy(0)}Z`;
+      el("path", { d: d + ends, fill, stroke: "none", class: "line-fade" }, svg);
+      el("path", { d, fill: "none", stroke: "var(--series-1)", "stroke-width": 1.5, "stroke-linejoin": "round" }, svg);
     }
 
     // crosshair + nearest-sample tooltip
@@ -262,6 +275,10 @@ export function lines(container, { series, xLabel, yLabel, ariaLabel, height = 2
 
     for (const s of series) {
       const d = s.points.map(([x, y], i) => `${i ? "L" : "M"}${sx(x).toFixed(1)},${sy(y).toFixed(1)}`).join("");
+      if (!s.dash && s.points.length) {
+        const ends = `L${sx(s.points[s.points.length - 1][0]).toFixed(1)},${sy(0)}L${sx(s.points[0][0]).toFixed(1)},${sy(0)}Z`;
+        el("path", { d: d + ends, fill: areaGradient(svg, s.color), stroke: "none", class: "line-fade" }, svg);
+      }
       // Solid series trace themselves in; dashed reference lines fade in.
       el("path", {
         d, fill: "none", stroke: s.color, "stroke-width": s.dash ? 1.75 : 2.25, "stroke-dasharray": s.dash || "none", "stroke-linejoin": "round",

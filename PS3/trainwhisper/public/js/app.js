@@ -2,7 +2,7 @@
 // page parts; this file handles routing, the side menu, uploads, the detail panel, zip and print.
 import { BENCHMARK, HEADLINES } from "./benchmark.js";
 import {
-  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, saveBlob, segmented, stagger, stat, table, titled, toast,
+  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, ring, saveBlob, segmented, stagger, stat, table, titled, toast,
 } from "./ui.js";
 import { hideTooltip, showTooltip } from "./charts.js";
 import { VIEWS } from "./views.js";
@@ -54,7 +54,7 @@ function closePanel() {
 }
 
 /** Entrance order for list-like containers, and count-up for figures. */
-const STAGGERED = ".page, .tab-body, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
+const STAGGERED = ".page, .tab-body, .hero-row, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
 function enhance(root) {
   stagger(root, STAGGERED);
   if (root.matches && root.matches(".tab-body")) [...root.children].forEach((c, i) => c.style.setProperty("--i", i));
@@ -220,7 +220,7 @@ function noticeBox() {
 // ------------------------------------------------------------- menu ----
 function renderMenu() {
   const item = (r, label, iconName, extra) => h("a", { href: `#/${r}`, class: "menu-item", "aria-current": route === r ? "page" : null },
-    icon(iconName, 18), h("span", {}, label), extra || null);
+    h("span", { class: "menu-ico" }, icon(iconName, 16)), h("span", {}, label), extra || null);
   const dot = (kind) => (session.has(kind)
     ? h("i", { class: `dot sev-${viewOf(kind).level}`, title: LEVELS[viewOf(kind).level].label }) : null);
   $("#menu").replaceChildren(
@@ -242,7 +242,7 @@ function renderMenu() {
 
 function renderCrumbs(kind) {
   const label = kind ? SYSTEMS[kind].title : { overview: "Overview", benchmark: "Benchmark", help: "Help" }[route];
-  $("#crumbs").replaceChildren(h("a", { href: "#/overview" }, "Dashboard"), h("span", { class: "sep", "aria-hidden": "true" }, "›"), h("span", { "aria-current": "page" }, label));
+  $("#crumbs").replaceChildren(h("a", { href: "#/overview", "aria-label": "Dashboard" }, icon("home", 16)), h("span", { class: "sep", "aria-hidden": "true" }, "/"), h("span", { "aria-current": "page" }, label));
 }
 
 const side = $("#side");
@@ -302,14 +302,45 @@ function overviewPage() {
         icon("arrow", 16));
     }))) : null;
 
-  const drop = h("button", { type: "button", class: "dropzone", onclick: () => pickFiles(null) },
-    icon("upload", 18), h("span", {}, h("b", {}, "Drop files anywhere"), " or browse. Mixed subsystems are sorted automatically."));
-
   return h("div", { class: "page", "data-state": session.size ? "done" : null },
-    h("div", { class: "page-head" }, h("h1", {}, "Overview")),
+    heroRow(),
     h("div", { class: "tiles" }, tiles),
-    priority,
-    drop);
+    priority);
+}
+
+/** Overview header: welcome card, coverage ring and status ring. */
+function heroRow() {
+  const n = session.size;
+  const levels = KINDS.filter((k) => session.has(k)).map((k) => viewOf(k).level);
+  const count = (pred) => (n ? String(levels.filter(pred).length) : "-");
+  const score = KINDS.reduce((s, k) => s + HEADLINES[k].score, 0) / KINDS.length;
+
+  const hero = h("section", { class: "card hero" },
+    h("div", { class: "hero-art", html: `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 3 5 29M21 3l6 26"/><path d="M8.6 10h14.8M7.4 17h17.2M6.2 24h19.6" opacity=".6"/></svg>` }),
+    h("div", { class: "hero-body" },
+      h("span", { class: "hero-kicker" }, "Train condition monitoring"),
+      h("h1", { class: "hero-title" }, "TrainWhisper"),
+      h("p", { class: "hero-text" }, "Drop telemetry anywhere on the page, or browse. Mixed subsystems are sorted automatically and analysed in this browser.")),
+    h("button", { type: "button", class: "hero-link", onclick: () => pickFiles(null) }, "Browse files", icon("arrow", 16)));
+
+  const coverage = card(titled("h3", "Coverage", "Subsystems with a result in this session. Each one adds a CSV to predictions.zip."),
+    h("p", { class: "card-sub" }, "Subsystems analysed"),
+    ring(n / 4, h("span", { class: "ring-badge" }, icon("grid", 26))),
+    h("div", { class: "ring-foot" },
+      h("span", {}, "0"),
+      h("div", {}, h("b", {}, `${n} of 4`), "analysed"),
+      h("span", {}, "4")));
+
+  const status = h("section", { class: "card score-card" },
+    h("div", { class: "card-head" }, titled("h3", "Fleet status", "Counts of analysed subsystems by status. The ring is the mean out-of-sample score of the four models; select it for the Benchmark page.")),
+    h("div", { class: "score-body" },
+      h("div", { class: "score-boxes" },
+        h("div", { class: "score-box" }, h("span", {}, "Need action"), h("b", {}, count((l) => LEVELS[l].rank >= 2))),
+        h("div", { class: "score-box" }, h("span", {}, "Monitor"), h("b", {}, count((l) => l === "watch")))),
+      h("a", { class: "score-ring", href: "#/benchmark", "aria-label": `Model score ${score.toFixed(2)}, open Benchmark` },
+        ring(score, [h("span", {}, "Model score"), h("b", {}, score.toFixed(2)), h("span", {}, "mean of 4")], { size: 170, color: "var(--good)" }))));
+
+  return h("div", { class: "hero-row" }, hero, coverage, status);
 }
 
 function systemPage(kind) {
@@ -362,7 +393,7 @@ function benchmarkPage() {
     h("div", { class: "page-head" }, h("h1", {}, "Benchmark", info("Out-of-sample validation scores of the selected models, using each subsystem's official metric."))),
     h("div", { class: "stats" }, KINDS.map((k) => {
       const b = HEADLINES[k];
-      return stat({ label: SYSTEMS[k].title, value: b.score.toFixed(3), caption: b.metric, tip: `${b.plain} Scale: ${b.scale}. Validation: ${b.validation}.` });
+      return stat({ label: SYSTEMS[k].title, value: b.score.toFixed(3), caption: b.metric, iconName: k, tip: `${b.plain} Scale: ${b.scale}. Validation: ${b.validation}.` });
     })),
     card(titled("h3", "All approaches", "Door uses a chronological split (one continuous stream). Rail uses nested CV because class priors are tuned. SHM uses leave-one-out."),
       table(BENCHMARK.map(([Subsystem, Model, Validation, Metric, Score, Status]) => ({ Subsystem: SYSTEMS[Subsystem].title, Model, Validation, Metric, Score, Status })), [

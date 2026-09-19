@@ -108,7 +108,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
 
   const signals = [
     card(titled("h3", "Motor current, full stream", "Idle time between cycles removed. Shaded cycles were classified as abnormal resistance."),
-      legend([["Motor current", "sw-line-ref"], ["Abnormal resistance", "sw-span"]]),
+      legend([["Motor current", "sw-line-sel"], ["Abnormal resistance", "sw-span"]]),
       chartHolder((holder) => segmentedLine(holder, {
         cycles,
         yLabel: "Motor current (mA)",
