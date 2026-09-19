@@ -3,8 +3,7 @@
 //     records: Node, signals: Node[], method, csv: { filename, text }, print: { columns, rows, note } }
 // app.js lays these out identically for every subsystem.
 import { bars, lines, segmentedLine } from "./charts.js";
-import { remainingLife } from "./engine/shm.js";
-import { pyFloat, toCsv } from "./engine/util.js";
+import { pyFloat, remainingLife, toCsv } from "./util.js";
 import {
   card, certainty, certaintyCell, clock, day, excelDate, fmt, h, int, legend, levelChip, segmented, signed, stat, table, titled,
 } from "./ui.js";

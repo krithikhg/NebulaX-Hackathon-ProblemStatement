@@ -320,7 +320,7 @@ function heroRow() {
     h("div", { class: "hero-body" },
       h("span", { class: "hero-kicker" }, "Train condition monitoring"),
       h("h1", { class: "hero-title" }, "TrainWhisper"),
-      h("p", { class: "hero-text" }, "Drop telemetry anywhere on the page, or browse. Mixed subsystems are sorted automatically and analysed in this browser.")),
+      h("p", { class: "hero-text" }, "Drop telemetry anywhere on the page, or browse. Mixed subsystems are sorted automatically.")),
     h("button", { type: "button", class: "hero-link", onclick: () => pickFiles(null) }, "Browse files", icon("arrow", 16)));
 
   const coverage = card(titled("h3", "Coverage", "Subsystems with a result in this session. Each one adds a CSV to predictions.zip."),
@@ -395,7 +395,7 @@ function benchmarkPage() {
       const b = HEADLINES[k];
       return stat({ label: SYSTEMS[k].title, value: b.score.toFixed(3), caption: b.metric, iconName: k, tip: `${b.plain} Scale: ${b.scale}. Validation: ${b.validation}.` });
     })),
-    card(titled("h3", "All approaches", "Door uses a chronological split (one continuous stream). Rail uses nested CV because class priors are tuned. SHM uses leave-one-out."),
+    card(titled("h3", "All approaches", "Door uses a chronological split (one continuous stream). Rail selects its top-40 features inside each fold. SHM uses leave-one-out."),
       table(BENCHMARK.map(([Subsystem, Model, Validation, Metric, Score, Status]) => ({ Subsystem: SYSTEMS[Subsystem].title, Model, Validation, Metric, Score, Status })), [
         { key: "Subsystem", label: "Subsystem" },
         { key: "Model", label: "Approach" },
@@ -498,5 +498,5 @@ function printReport(kinds) {
 }
 
 // ------------------------------------------------------------- start ----
-$("#local-note").replaceChildren(icon("lock", 14), h("span", {}, "Local processing"), info("Files are analysed in this browser and never leave the computer."));
+$("#local-note").replaceChildren(icon("cloud", 14), h("span", {}, "Cloud processing"), info("Files are analysed on the TrainWhisper server and are not stored after the response."));
 render();
