@@ -29,11 +29,13 @@ to move on the held-out set; the other three are stable.
 
 Or from the CLI: `cd PS3/trainwhisper && vercel --prod`.
 
-To preview locally, serve `public/` with any static server, e.g.
-`python -m http.server -d public 8000`. (Opening `index.html` from disk won't work:
-module workers need HTTP.)
+To preview locally, run `python serve.py` from this folder and open
+http://localhost:8000. It serves `public/` with caching disabled, so an edited JS
+module is never mixed with a stale copy of another one (a blank page after
+pulling changes is usually that; Ctrl+Shift+R fixes it). Opening `index.html`
+from disk won't work: module workers need HTTP.
 
-The **Load sample** buttons fetch the published test files from this repo on
+The **Try a sample** buttons fetch the published test files from this repo on
 `raw.githubusercontent.com`, so they work on any deployment without bundling data.
 
 ## Web app layout
@@ -41,13 +43,57 @@ The **Load sample** buttons fetch the published test files from this repo on
 ```
 public/
   index.html, styles.css
-  js/app.js          UI: upload, auto-detect, rendering, CSV downloads
+  js/app.js          shell: routing, side menu, uploads, detail panel, zip, print
+  js/views.js        one view per subsystem: payload -> stats, visual, actions, records, panels
+  js/ui.js           shared UI pieces: status levels, names, info tips, tables, formatting
+  js/benchmark.js    validation scores shown on the Benchmark page (edit when a model changes)
   js/charts.js       SVG charts with hover tooltips
+  js/zip.js          builds predictions.zip in the browser (no dependency)
   js/worker.js       runs the models in a Web Worker so the page stays responsive
   js/engine/         JavaScript ports of door.py / acv.py / rail.py / shm.py
   models/            exported models (door_rf.json, rail_rf.json, shm_fit.json)
   vendor/xlsx.mjs    SheetJS 0.20.3 for reading ACV workbooks (Apache-2.0)
 ```
+
+### Interface
+
+Layout follows the MUI dashboard template (side menu, breadcrumbs, outlined stat
+cards), ported to plain CSS so the site still needs no build step.
+
+- **Overview**: one tile per subsystem with its status, key figure and a mini
+  visual. Each tile has its own Upload and Sample buttons and accepts dropped
+  files. A priority list ranks analysed subsystems by urgency.
+- **Subsystem page**: status, headline and three tabs. *Summary* has stat cards,
+  one interactive visual (cycle timeline, train consist, recording grid, damage
+  gauges) and an action checklist. *Records* is a filterable table. *Signals*
+  holds the engineering charts.
+- **Detail panel**: selecting any cycle, car, recording or segment opens a side
+  panel with that item's figures and chart.
+- **Info icons (i)**: definitions and method notes are shown on hover or tap
+  instead of on the page.
+- **Side menu**: status dot per subsystem, plus `predictions.zip` and a printable
+  report with sign-off lines.
+
+Four statuses are used everywhere: Act now, Plan, Monitor, Normal. The Door and
+SHM thresholds are team defaults set in `js/views.js`.
+
+### UI payload contract (keep this when replacing a model)
+
+`worker.js` returns these shapes and `views.js` renders them. A new model can do
+anything internally as long as its handler still returns:
+
+| Subsystem | Payload |
+|---|---|
+| Door | `{ name, result: [{ start_time, end_time, prediction, confidence, mean_current_mA, peak_current_mA }], cycles: [{ points: [[idx, mA, epochMs]], abnormal, operation, t0, duration_s }] }` |
+| ACV | `{ name, ranked: [{ car, score, cabin_temp_dev_C, low_pressure_dev? }], samples, train, window }` (most likely first) |
+| Rail | `{ result: [{ file_id, prediction, confidence, speed_m_s }], bands: [{ file_id, speed, stationary, side1[], side2[] }], bandLabels }` |
+| SHM | `{ result: [{ file_id, prediction }], detail: [{ file_id, cycles, peak_amplitude, histogram }], fit: { m, C, loo_mape } }` |
+
+`prediction` values and CSV columns must stay as the spec requires (`Normal` /
+`Abnormal resistance`, `Normal` / `Side I` / `Side II`, numeric damage). `confidence`
+is the model's probability for its chosen class (0–1). The UI shows it as
+high (≥ 0.9), medium (≥ 0.7) or low certainty. After retraining, update the scores
+in `js/benchmark.js`.
 
 The engine mirrors the Python pipeline decision for decision: random forests are
 walked tree by tree with float32 inputs (as scikit-learn casts them), the FFT is

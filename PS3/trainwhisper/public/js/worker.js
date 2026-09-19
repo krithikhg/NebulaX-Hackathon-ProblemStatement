@@ -1,5 +1,8 @@
-// Runs the models off the main thread. Receives { kind, files: [{ name, buffer }] },
+// Runs the models off the main thread. Receives { kind, files: [{ name, blob }] },
 // posts { type: "progress" | "result" | "error" }.
+//
+// Each handler returns the payload the UI renders (see "UI payload contract" in README.md).
+// When a model is swapped, keep these payload shapes and the UI keeps working.
 import * as acv from "./engine/acv.js";
 import * as door from "./engine/door.js";
 import * as rail from "./engine/rail.js";
@@ -37,45 +40,79 @@ function decimate(xs, ys, buckets) {
   return out;
 }
 
+/** Rainflow histogram: equal-width amplitude bins, weighted by cycle count. */
+function histogram(cycles, bins = 40) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const [a] of cycles) { lo = Math.min(lo, a); hi = Math.max(hi, a); }
+  const width = (hi - lo) / bins || 1;
+  const counts = new Array(bins).fill(0);
+  for (const [a, n] of cycles) counts[Math.min(bins - 1, Math.floor((a - lo) / width))] += n;
+  return counts.map((count, k) => ({ lo: lo + k * width, hi: lo + (k + 1) * width, count }));
+}
+
 const handlers = {
   async Door(files) {
-    progress(0, 1, "Segmenting door cycles…");
-    const { result, stream } = door.predict(decode(files[0].buffer), await model("door_rf.json"));
-    // Plot against sample order so the 20 s+ idle gaps between cycles don't flatten the trace.
-    const current = stream.cols[door.SIGNALS.c];
+    progress(0, 1, "segmenting cycles");
+    const { result, stream } = door.predict(decode(await files[0].blob.arrayBuffer()), await model("door_rf.json"));
+    const { cols } = stream;
+    const current = cols[door.SIGNALS.c];
+    const closing = cols["Door is closing"];
     const cycles = result.map((r) => {
-      const idx = Array.from({ length: r.rows[1] - r.rows[0] }, (_, k) => r.rows[0] + k);
+      const [a, b] = r.rows;
+      const idx = Array.from({ length: b - a }, (_, k) => a + k);
+      let isClosing = false;
+      if (closing) for (const i of idx) if (closing[i] >= 1) { isClosing = true; break; }
       return {
-        points: decimate(idx, idx.map((i) => current[i]), 150).map(([i, y]) => [i, y, stream.cols.t[i]]),
+        // [sample index, current mA, epoch ms]
+        points: decimate(idx, idx.map((i) => current[i]), 150).map(([i, y]) => [i, y, cols.t[i]]),
         abnormal: r.prediction === door.ABNORMAL,
+        operation: closing ? (isClosing ? "Closing" : "Opening") : null,
+        t0: cols.t[a],
+        duration_s: (cols.t[b - 1] - cols.t[a]) / 1000,
       };
     });
     return { name: files[0].name, result, cycles };
   },
 
   async ACV(files) {
-    progress(0, 1, "Reading workbook…");
+    progress(0, 2, "reading workbook");
     const XLSX = await import("../vendor/xlsx.mjs");
-    const wb = XLSX.read(files[0].buffer, {
+    const wb = XLSX.read(await files[0].blob.arrayBuffer(), {
       type: "array", dense: true, sheets: 0,
       cellText: false, cellHTML: false, cellFormula: false, cellStyles: false, cellNF: false,
     });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null, blankrows: true });
-    progress(1, 2, "Ranking cars…");
-    return { name: files[0].name, ranked: acv.rankCars(acv.frameFromRows(rows)) };
+    progress(1, 2, "ranking cars");
+    const frame = acv.frameFromRows(rows);
+    // Display-only context: recording window and train number, when the file carries them.
+    const find = (re) => frame.header.find((h) => !/^Car \d/.test(h) && re.test(h));
+    const timeCol = find(/time/i);
+    const trainCol = find(/train/i);
+    const times = timeCol ? frame.cols[timeCol].filter((v) => v !== null && v !== "") : [];
+    return {
+      name: files[0].name,
+      ranked: acv.rankCars(frame),
+      samples: frame.n,
+      train: trainCol ? frame.cols[trainCol].find((v) => v !== null && v !== "") : null,
+      window: times.length ? [times[0], times[times.length - 1]] : null,
+    };
   },
 
   async "Rail corrugation"(files) {
     const m = await model("rail_rf.json");
     const feats = [];
     for (let i = 0; i < files.length; i++) {
-      progress(i, files.length, `Extracting spectral features… ${i}/${files.length} files`);
-      feats.push({ ...rail.extractFeatures(decode(files[i].buffer)), filename: files[i].name });
+      progress(i, files.length, files.length > 1
+        ? `extracting features, file ${i + 1} of ${files.length}`
+        : "extracting features");
+      feats.push({ ...rail.extractFeatures(decode(await files[i].blob.arrayBuffer())), filename: files[i].name });
     }
     const result = rail.predictFeatures(feats, m);
     const bands = feats.map((f) => ({
       file_id: f.filename,
       speed: f._speed,
+      stationary: f._speed < m.stationary_speed,
       side1: rail.BANDS.map((_, i) => f[`s1vib_b${i}_mean`]),
       side2: rail.BANDS.map((_, i) => f[`s2vib_b${i}_mean`]),
     }));
@@ -85,22 +122,20 @@ const handlers = {
   async SHM(files) {
     const fit = await model("shm_fit.json");
     const result = [];
-    let first = null;
+    const detail = [];
     for (let i = 0; i < files.length; i++) {
-      progress(i, files.length, `Counting rainflow cycles… ${i}/${files.length} files`);
-      const { damage, cycles } = shm.predictSignal(shm.loadSignal(decode(files[i].buffer)), fit);
+      progress(i, files.length, files.length > 1
+        ? `rainflow counting, file ${i + 1} of ${files.length}`
+        : "rainflow counting");
+      const signal = shm.loadSignal(decode(await files[i].blob.arrayBuffer()));
+      const { damage, cycles } = shm.predictSignal(signal, fit);
       result.push({ file_id: files[i].name, prediction: damage });
-      if (!first) first = { name: files[i].name, cycles };
+      let n = 0;
+      let peak = 0;
+      for (const [a, c] of cycles) { n += c; peak = Math.max(peak, a); }
+      detail.push({ file_id: files[i].name, samples: signal.length, cycles: n, peak_amplitude: peak, histogram: histogram(cycles) });
     }
-    // Rainflow histogram of the first file: 60 equal-width amplitude bins, weighted by cycle count.
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const [a] of first.cycles) { lo = Math.min(lo, a); hi = Math.max(hi, a); }
-    const width = (hi - lo) / 60 || 1;
-    const counts = new Array(60).fill(0);
-    for (const [a, n] of first.cycles) counts[Math.min(59, Math.floor((a - lo) / width))] += n;
-    const histogram = counts.map((count, k) => ({ lo: lo + k * width, hi: lo + (k + 1) * width, count }));
-    return { result, histogram, histogramFile: first.name, fit };
+    return { result, detail, fit };
   },
 };
 
