@@ -76,11 +76,22 @@ MODEL_PATH = os.path.join(MODEL_DIR, "door_model.joblib")
 
 # ---- loading & segmentation -------------------------------------------------
 
+def parse_datetime(values) -> pd.Series:
+    """Parse the native `2023-7-5-0-0-1-20` format.
+
+    The last field is milliseconds without zero padding, so `%f` (a decimal
+    fraction) would read `20` as 0.200 s and put samples out of order.
+    """
+    parts = pd.Series(values).astype(str).str.rsplit("-", n=1, expand=True)
+    base = pd.to_datetime(parts[0], format="%Y-%m-%d-%H-%M-%S")
+    return base + pd.to_timedelta(parts[1].astype(int), unit="ms")
+
+
 def load_stream(path) -> pd.DataFrame:
     """Read a raw Door CSV and parse its native timestamp format."""
     df = pd.read_csv(path)
     df.columns = [c.strip() for c in df.columns]
-    df["_t"] = pd.to_datetime(df["Datetime"], format=DATETIME_FORMAT)
+    df["_t"] = parse_datetime(df["Datetime"])
     return df
 
 
@@ -370,7 +381,7 @@ def fit(train_path, train_answer_path) -> tuple[dict, dict, str]:
     """
     data = assign_cycles(load_stream(train_path))
     answer = pd.read_csv(train_answer_path)
-    answer["start_time"] = pd.to_datetime(answer["start_time"], format=DATETIME_FORMAT)
+    answer["start_time"] = parse_datetime(answer["start_time"])
     truth = pd.Series(answer["status"].to_numpy(), index=np.arange(1, len(answer) + 1))
 
     splits = split_cycles(answer)
