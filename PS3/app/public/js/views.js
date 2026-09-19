@@ -67,7 +67,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
       subtitle: `${r.operation || "Cycle"} · ${day(r.t0)} ${clock(r.t0)}`,
       body: [
         h("div", { class: "stats-2" },
-          stat({ label: "Mean current", value: `${int(r.mean_current_mA)} mA`, caption: rel !== null ? `${signed(rel * 100, 0)}% vs median normal` : null }),
+          stat({ label: "Mean current", value: `${int(r.mean_current_mA)} mA`, caption: rel !== null ? `${signed(rel * 100, 0)}% vs normal` : null, tip: rel !== null ? "Compared with the median normal cycle in the same direction." : null }),
           stat({ label: "Peak current", value: `${int(r.peak_current_mA)} mA` }),
           stat({ label: "Duration", value: `${r.duration_s.toFixed(1)} s` })),
         titled("h4", "Motor current", "Higher current for the same movement means the motor is working against extra resistance."),
