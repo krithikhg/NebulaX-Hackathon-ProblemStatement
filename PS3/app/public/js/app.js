@@ -2,19 +2,12 @@
 // page parts; this file handles routing, the side menu, uploads, the detail panel, zip and print.
 import { BENCHMARK, HEADLINES } from "./benchmark.js";
 import {
-  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, ring, saveBlob, segmented, stagger, stat, table, titled, toast,
+  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, saveBlob, segmented, stagger, stat, table, titled, toast,
 } from "./ui.js";
 import { hideTooltip, showTooltip } from "./charts.js";
 import { VIEWS } from "./views.js";
 import { makeZip } from "./zip.js";
 
-const SAMPLE_BASE = "https://raw.githubusercontent.com/krithikhg/NebulaX-Hackathon-ProblemStatement/main/PS3/02_Datasets/";
-const SAMPLES = {
-  door: { kind: "Door", path: "Door/Test.csv" },
-  acv: { kind: "ACV", path: "ACV/Test/acv_test_case.xlsx" },
-  rail: { kind: "Rail corrugation", path: "Rail_Corrugation/Test/Test5.csv" },
-  shm: { kind: "SHM", path: "SHM/Test/test02.csv" },
-};
 const SINGLE_FILE = new Set(["Door", "ACV"]);
 
 const content = $("#content");
@@ -54,7 +47,7 @@ function closePanel() {
 }
 
 /** Entrance order for list-like containers, and count-up for figures. */
-const STAGGERED = ".page, .tab-body, .hero-row, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
+const STAGGERED = ".page, .tab-body, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
 function enhance(root) {
   stagger(root, STAGGERED);
   if (root.matches && root.matches(".tab-body")) [...root.children].forEach((c, i) => c.style.setProperty("--i", i));
@@ -119,7 +112,7 @@ const FRIENDLY_ERRORS = [
 const friendly = (msg) => (FRIENDLY_ERRORS.find(([re]) => re.test(msg)) || [null, msg])[1];
 
 let busy = false;
-/** hint: subsystem to assume when a file can't be recognised (the page the user is on, or a sample). */
+/** hint: subsystem to assume when a file can't be recognised (the page the user is on, or the tile it was dropped on). */
 async function analyse(files, hint) {
   if (busy || !files.length) return;
   busy = true;
@@ -255,9 +248,6 @@ toggle.addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------ pages ----
-function sampleButton(key, label = "Sample") {
-  return h("button", { type: "button", class: "btn small", "data-sample": key, onclick: (e) => { e.stopPropagation(); loadSample(key); } }, icon("sample", 14), label);
-}
 function uploadButton(kind, label = "Upload") {
   return h("button", { type: "button", class: "btn small", onclick: (e) => { e.stopPropagation(); pickFiles(kind); } }, icon("upload", 14), label);
 }
@@ -279,7 +269,7 @@ function overviewPage() {
         h("a", { class: "tile-go", href: `#/${s.key}`, "aria-label": `Open ${s.title}` }, icon("arrow", 16)),
       ] : [
         h("div", { class: "tile-empty" }, icon("file", 20), h("span", {}, s.needs)),
-        h("div", { class: "tile-actions" }, uploadButton(k), sampleButton(s.key)),
+        h("div", { class: "tile-actions" }, uploadButton(k)),
       ]);
     if (e) {
       tile.tabIndex = 0;
@@ -303,43 +293,9 @@ function overviewPage() {
     }))) : null;
 
   return h("div", { class: "page", "data-state": session.size ? "done" : null },
-    heroRow(),
+    h("div", { class: "page-head" }, h("h1", {}, "Overview")),
     h("div", { class: "tiles" }, tiles),
     priority);
-}
-
-/** Overview header: welcome card, session gauge and model-score gauge. */
-function heroRow() {
-  const n = session.size;
-  const levels = KINDS.filter((k) => session.has(k)).map((k) => viewOf(k).level);
-  const count = (pred) => (n ? String(levels.filter(pred).length) : "-");
-  const score = KINDS.reduce((s, k) => s + HEADLINES[k].score, 0) / KINDS.length;
-  const foot = (items) => h("div", { class: "gauge-foot" }, items.map(([label, value]) => h("div", {}, h("span", {}, label), h("b", {}, value))));
-
-  const hero = h("section", { class: "card hero" },
-    h("div", { class: "hero-art", html: `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 3 5 29M21 3l6 26"/><path d="M8.6 10h14.8M7.4 17h17.2M6.2 24h19.6" opacity=".6"/></svg>` }),
-    h("div", { class: "hero-body" },
-      h("span", { class: "hero-kicker" }, "Train condition monitoring"),
-      h("h1", { class: "hero-title" }, "TrainWhisper"),
-      h("p", { class: "hero-text" }, "Drop telemetry anywhere on the page, or browse. Mixed subsystems are sorted automatically.")),
-    h("button", { type: "button", class: "btn primary hero-link", onclick: () => pickFiles(null) }, icon("upload", 16), "Browse files"));
-
-  const coverage = h("section", { class: "card gauge-card" },
-    h("div", { class: "gauge-top" },
-      titled("h3", "This session", "Subsystems with a result in this session. Each one adds a CSV to predictions.zip."),
-      h("p", { class: "card-sub" }, "Subsystems analysed, and their status"),
-      ring(n / 4, [h("b", {}, `${n}/4`), h("span", {}, "analysed")], { size: 240, half: true })),
-    foot([["Need action", count((l) => LEVELS[l].rank >= 2)], ["Monitor", count((l) => l === "watch")], ["Normal", count((l) => l === "ok")]]));
-
-  const model = h("section", { class: "card gauge-card" },
-    h("div", { class: "gauge-top" },
-      h("div", { class: "card-head" }, titled("h3", "Model score", "Mean out-of-sample score of the four selected models."),
-        h("a", { class: "link", href: "#/benchmark" }, "Benchmark")),
-      h("p", { class: "card-sub" }, "Validation score, mean of 4 subsystems"),
-      ring(score, [h("b", {}, score.toFixed(2)), h("span", {}, "out of 1.00")], { size: 240, half: true, color: "var(--good)" })),
-    foot(KINDS.map((k) => [SYSTEMS[k].key === "rail" ? "Rail" : SYSTEMS[k].title, HEADLINES[k].score.toFixed(2)])));
-
-  return h("div", { class: "hero-row" }, hero, coverage, model);
 }
 
 function systemPage(kind) {
@@ -359,7 +315,7 @@ function systemPage(kind) {
       h("b", {}, "No data yet"),
       h("span", {}, `${s.needs}. Drop it here or browse.`));
     addDropTarget(empty, kind);
-    return h("div", { class: "page" }, head, empty, h("div", { class: "center" }, sampleButton(s.key, "Load sample data")));
+    return h("div", { class: "page" }, head, empty);
   }
 
   const v = viewOf(kind);
@@ -449,20 +405,6 @@ window.addEventListener("drop", async (e) => {
   dropHint = null;
   if (e.dataTransfer.files.length) await analyse([...e.dataTransfer.files].map((f) => ({ name: f.name, blob: f })), hint);
 });
-
-async function loadSample(key) {
-  if (busy) return;
-  const { kind, path } = SAMPLES[key];
-  const name = path.split("/").pop();
-  setStatus(`Downloading sample ${name}`);
-  try {
-    const res = await fetch(SAMPLE_BASE + path);
-    if (!res.ok) throw new Error(`Sample download failed (${res.status}).`);
-    await analyse([{ name, blob: await res.blob() }], kind);
-  } catch (err) {
-    setStatus(err.message, { error: true });
-  }
-}
 
 // ----------------------------------------------------- zip and print ----
 function downloadZip() {
