@@ -155,21 +155,21 @@ export function stat({ label, value, chip, caption, tip, iconName }) {
     iconName ? h("span", { class: "stat-ico" }, icon(iconName, 20)) : null);
 }
 
-let ringSeq = 0;
-/** Circular progress with a gradient stroke. fraction is 0..1; centre is any node(s). */
-export function ring(fraction, centre, { size = 180, color = "var(--brand)" } = {}) {
-  const id = `ring-grad-${++ringSeq}`;
+/**
+ * Progress gauge: a full ring, or a semicircle (half: true) with the centre content at its base.
+ * fraction is 0..1; centre is any node(s).
+ */
+export function ring(fraction, centre, { size = 180, color = "var(--brand)", half = false } = {}) {
   const r = 44;
   const c = 2 * Math.PI * r;
-  const off = c * (1 - Math.min(1, Math.max(0, fraction)));
-  const node = h("div", { class: "ring", style: `width:${size}px;height:${size}px` });
-  node.innerHTML = `<svg viewBox="0 0 100 100" aria-hidden="true">
-    <defs><linearGradient id="${id}" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" style="stop-color:${color};stop-opacity:.1"/><stop offset="1" style="stop-color:${color}"/>
-    </linearGradient></defs>
-    <circle class="ring-track" cx="50" cy="50" r="${r}" stroke-width="7"/>
-    <circle class="ring-arc" cx="50" cy="50" r="${r}" stroke-width="7" stroke="url(#${id})" transform="rotate(-90 50 50)"
-      stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" style="--c:${c.toFixed(2)}"${fraction > 0 ? "" : ' visibility="hidden"'}/>
+  const len = half ? c / 2 : c;
+  const f = Math.min(1, Math.max(0, fraction));
+  const turn = half ? "rotate(180 50 50)" : "rotate(-90 50 50)";
+  const node = h("div", { class: `ring${half ? " half" : ""}`, style: `width:${size}px` });
+  node.innerHTML = `<svg viewBox="0 0 100 ${half ? 54 : 100}" aria-hidden="true">
+    <circle class="ring-track" cx="50" cy="50" r="${r}" stroke-width="${half ? 6 : 7}" transform="${turn}" stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}"/>
+    <circle class="ring-arc" cx="50" cy="50" r="${r}" stroke-width="${half ? 6 : 7}" stroke="${color}" transform="${turn}"
+      stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}" stroke-dashoffset="${(len * (1 - f)).toFixed(2)}" style="--c:${len.toFixed(2)}"${f > 0 ? "" : ' visibility="hidden"'}/>
   </svg>`;
   node.append(h("div", { class: "ring-centre" }, centre));
   return node;

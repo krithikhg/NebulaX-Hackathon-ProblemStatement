@@ -99,7 +99,8 @@ def _excel_serial(v):
 # ------------------------------------------------------------- payloads ----
 def door_payload(path: str, name: str) -> dict:
     idx, d = door.predict_with_traces(path)
-    t_ms = (d["t"].astype("int64") // 1_000_000).to_numpy()
+    # pandas 3 may parse at us resolution, so convert to ms explicitly rather than assume ns.
+    t_ms = d["t"].astype("datetime64[ms]").astype("int64").to_numpy()
     current = d[door.SIGNALS["c"]].to_numpy(dtype=float)
     closing = d["Door is closing"].to_numpy(dtype=float)
 

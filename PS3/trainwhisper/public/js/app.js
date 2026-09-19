@@ -220,7 +220,7 @@ function noticeBox() {
 // ------------------------------------------------------------- menu ----
 function renderMenu() {
   const item = (r, label, iconName, extra) => h("a", { href: `#/${r}`, class: "menu-item", "aria-current": route === r ? "page" : null },
-    h("span", { class: "menu-ico" }, icon(iconName, 16)), h("span", {}, label), extra || null);
+    h("span", { class: "menu-ico" }, icon(iconName, 20)), h("span", {}, label), extra || null);
   const dot = (kind) => (session.has(kind)
     ? h("i", { class: `dot sev-${viewOf(kind).level}`, title: LEVELS[viewOf(kind).level].label }) : null);
   $("#menu").replaceChildren(
@@ -308,12 +308,13 @@ function overviewPage() {
     priority);
 }
 
-/** Overview header: welcome card, coverage ring and status ring. */
+/** Overview header: welcome card, session gauge and model-score gauge. */
 function heroRow() {
   const n = session.size;
   const levels = KINDS.filter((k) => session.has(k)).map((k) => viewOf(k).level);
   const count = (pred) => (n ? String(levels.filter(pred).length) : "-");
   const score = KINDS.reduce((s, k) => s + HEADLINES[k].score, 0) / KINDS.length;
+  const foot = (items) => h("div", { class: "gauge-foot" }, items.map(([label, value]) => h("div", {}, h("span", {}, label), h("b", {}, value))));
 
   const hero = h("section", { class: "card hero" },
     h("div", { class: "hero-art", html: `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 3 5 29M21 3l6 26"/><path d="M8.6 10h14.8M7.4 17h17.2M6.2 24h19.6" opacity=".6"/></svg>` }),
@@ -321,26 +322,24 @@ function heroRow() {
       h("span", { class: "hero-kicker" }, "Train condition monitoring"),
       h("h1", { class: "hero-title" }, "TrainWhisper"),
       h("p", { class: "hero-text" }, "Drop telemetry anywhere on the page, or browse. Mixed subsystems are sorted automatically.")),
-    h("button", { type: "button", class: "hero-link", onclick: () => pickFiles(null) }, "Browse files", icon("arrow", 16)));
+    h("button", { type: "button", class: "btn primary hero-link", onclick: () => pickFiles(null) }, icon("upload", 16), "Browse files"));
 
-  const coverage = card(titled("h3", "Coverage", "Subsystems with a result in this session. Each one adds a CSV to predictions.zip."),
-    h("p", { class: "card-sub" }, "Subsystems analysed"),
-    ring(n / 4, h("span", { class: "ring-badge" }, icon("grid", 26))),
-    h("div", { class: "ring-foot" },
-      h("span", {}, "0"),
-      h("div", {}, h("b", {}, `${n} of 4`), "analysed"),
-      h("span", {}, "4")));
+  const coverage = h("section", { class: "card gauge-card" },
+    h("div", { class: "gauge-top" },
+      titled("h3", "This session", "Subsystems with a result in this session. Each one adds a CSV to predictions.zip."),
+      h("p", { class: "card-sub" }, "Subsystems analysed, and their status"),
+      ring(n / 4, [h("b", {}, `${n}/4`), h("span", {}, "analysed")], { size: 240, half: true })),
+    foot([["Need action", count((l) => LEVELS[l].rank >= 2)], ["Monitor", count((l) => l === "watch")], ["Normal", count((l) => l === "ok")]]));
 
-  const status = h("section", { class: "card score-card" },
-    h("div", { class: "card-head" }, titled("h3", "Fleet status", "Counts of analysed subsystems by status. The ring is the mean out-of-sample score of the four models; select it for the Benchmark page.")),
-    h("div", { class: "score-body" },
-      h("div", { class: "score-boxes" },
-        h("div", { class: "score-box" }, h("span", {}, "Need action"), h("b", {}, count((l) => LEVELS[l].rank >= 2))),
-        h("div", { class: "score-box" }, h("span", {}, "Monitor"), h("b", {}, count((l) => l === "watch")))),
-      h("a", { class: "score-ring", href: "#/benchmark", "aria-label": `Model score ${score.toFixed(2)}, open Benchmark` },
-        ring(score, [h("span", {}, "Model score"), h("b", {}, score.toFixed(2)), h("span", {}, "mean of 4")], { size: 170, color: "var(--good)" }))));
+  const model = h("section", { class: "card gauge-card" },
+    h("div", { class: "gauge-top" },
+      h("div", { class: "card-head" }, titled("h3", "Model score", "Mean out-of-sample score of the four selected models."),
+        h("a", { class: "link", href: "#/benchmark" }, "Benchmark")),
+      h("p", { class: "card-sub" }, "Validation score, mean of 4 subsystems"),
+      ring(score, [h("b", {}, score.toFixed(2)), h("span", {}, "out of 1.00")], { size: 240, half: true, color: "var(--good)" })),
+    foot(KINDS.map((k) => [SYSTEMS[k].key === "rail" ? "Rail" : SYSTEMS[k].title, HEADLINES[k].score.toFixed(2)])));
 
-  return h("div", { class: "hero-row" }, hero, coverage, status);
+  return h("div", { class: "hero-row" }, hero, coverage, model);
 }
 
 function systemPage(kind) {
