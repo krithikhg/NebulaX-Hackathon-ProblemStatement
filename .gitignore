@@ -20,7 +20,7 @@ Thumbs.db
 *.pkl
 *.h5
 *.keras
-PS3/solution/**/cache/
+PS3/**/cache/
 *.npy
 *.npz
 

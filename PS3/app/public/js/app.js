@@ -5,7 +5,7 @@ import {
   $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, saveBlob, segmented, stagger, stat, table, titled, toast,
 } from "./ui.js";
 import { hideTooltip, showTooltip } from "./charts.js";
-import { getSelectedStream, refreshStreams } from "./shm_stream.js";
+import { getSelectedStream, mountComponentPicker, refreshStreams } from "./shm_stream.js";
 import { VIEWS } from "./views.js";
 import { makeZip } from "./zip.js";
 
@@ -313,7 +313,9 @@ function systemPage(kind) {
   const e = session.get(kind);
   const head = h("div", { class: "page-head" },
     h("div", {}, h("h1", {}, s.title, h("small", {}, s.full)),
-      e ? h("div", { class: "page-meta" }, levelChip(viewOf(kind).level), h("span", {}, `${e.files.length === 1 ? e.files[0] : `${e.files.length} files`} · ${e.at}`)) : null),
+      e ? h("div", { class: "page-meta" }, levelChip(viewOf(kind).level), h("span", {}, `${e.files.length === 1 ? e.files[0] : `${e.files.length} files`} · ${e.at}`)) : null,
+      // SHM files are filed under a component, chosen here before uploading.
+      kind === "SHM" ? mountComponentPicker() : null),
     e ? h("div", { class: "page-actions" },
       iconButton("download", `Download ${s.csv}`, () => saveBlob(new Blob([viewOf(kind).csv.text], { type: "text/csv" }), viewOf(kind).csv.filename)),
       iconButton("print", "Print job sheet", () => printReport([kind])),

@@ -34,6 +34,23 @@ FINAL_PARAMS = dict()          # regularised defaults (chosen by 10-seed means)
 SEEDS = tuple(range(10))
 LABELS = ["Normal", "Side I", "Side II"]
 
+# Batch decision rule for macro F1 (see README / write-up): argmax maximises
+# per-file accuracy, but the score averages the three imbalanced classes, so we
+# flag the top-k most fault-like files with k = round(FAULT_BUDGET_RATE * n_files).
+# 12/68 was selected by out-of-fold validation on the 272-file training set.
+FAULT_BUDGET_RATE = 12 / 68
+
+
+def _budget_labels(P: np.ndarray) -> list:
+    """Force the top-k fault-like files to Side I/II, the rest to Normal."""
+    labels = [LABELS[0]] * len(P)
+    k = int(round(FAULT_BUDGET_RATE * len(P)))
+    if k <= 0:
+        return labels
+    for i in np.argsort(-np.maximum(P[:, 1], P[:, 2]))[:k]:
+        labels[i] = LABELS[1] if P[i, 1] >= P[i, 2] else LABELS[2]
+    return labels
+
 
 # --------------------------------------------------------------------------- #
 def train_final(verbose=True):
@@ -76,7 +93,10 @@ def predict(input_arg: str, output_csv: str, bundle=None):
         rows.append(os.path.basename(p))
     X = np.asarray(X, dtype=float)
     P = np.mean([m.predict_proba(X) for m in models], axis=0)
-    labels = [LABELS[i] for i in P.argmax(1)]
+    # Batch (folder) input uses the macro-F1 operating point; a single file has
+    # no batch to rank, so fall back to argmax.
+    labels = (_budget_labels(P) if len(paths) > 1
+              else [LABELS[i] for i in P.argmax(1)])
     os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
     pd.DataFrame({"file_id": rows, "prediction": labels}).to_csv(output_csv, index=False)
     print(f"wrote {len(rows)} predictions -> {output_csv}")

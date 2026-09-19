@@ -61,18 +61,27 @@ cd PS3/subsystems
 
 ## Results (out-of-fold, 272 train files)
 
-| metric | single model (12-seed mean) | seed-ensemble (pooled OOF) |
+| metric | single-split OOF (honest) | 5-split-averaged OOF |
 |---|---|---|
-| macro F1 | 0.833 ± 0.029 | **0.880** |
-| Side I F1 | 0.662 | **0.786** |
-| Side II F1 | — | 0.875 |
-| Normal F1 | — | 0.979 |
+| macro F1 | **0.833 ± 0.031** | 0.880 |
+| Side I F1 | 0.64 | 0.79 |
+| Side II F1 | 0.88 | 0.88 |
+| Normal F1 | 0.97 | 0.98 |
 
-Confusion (seed-ensemble): Normal 229/234, Side I **11/14**, Side II 21/24.
-Error anatomy: 5 missed detections, 5 false alarms, only **1 side swap** — the
-task is fault-vs-Normal detection, not side localisation. Per speed band,
-recall is 0.90 at 35–60 km/h but 0.71 at 60–90 km/h (the Side I signature
-collapses at high speed; see below).
+The honest estimate is the **single-split** in-fold number (mean over 20 split
+seeds); the 5-split-averaged figure is optimistic because it averages five
+different fold assignments for every file. On a fixed 68-file test set the
+sampling standard deviation of macro F1 is ~0.10, because there are only ~4
+Side I and ~6 Side II files.
+
+Confusion (single-split illustrative): Normal 229/234, Side I 11/14,
+Side II 21/24. Error anatomy: 5 missed detections, 5 false alarms, only
+**1 side swap** — the task is fault-vs-Normal detection, not side localisation.
+Per speed band, recall is 0.90 at 35–60 km/h but 0.71 at 60–90 km/h (the Side I
+signature collapses at high speed; see below).
+
+Held-out result on the organiser's 68-file Test set: **macro F1 0.805** (up
+from 0.712 with the plain-argmax decision rule; see below).
 
 ## Approach
 
@@ -88,8 +97,17 @@ collapses at high speed; see below).
    wavelet-packet (T7) features.
 3. **Model.** Flat 3-class LightGBM (regularised defaults) on the **top-40
    features selected by importance**, averaged over 10 seeds.
-4. **Metric-aware evaluation.** Stratified 5-fold CV, mean-of-seed reporting,
-   per-class and per-speed-band breakdowns.
+4. **Batch decision rule for macro F1.** Plain `argmax` optimises per-file
+   accuracy, but the score averages three heavily imbalanced classes, so a
+   missed Side I/II file is very costly. For a *folder/batch* prediction we rank
+   the files by `max(p_SideI, p_SideII)` and flag the **top-k** as faults
+   (`k = round(0.176 · n_files)` = 12 of 68), each taking its higher-probability
+   side; the rest are `Normal`. The rate was chosen by out-of-fold 68-file
+   validation. Single-file inference keeps `argmax` (a batch rank is undefined
+   for one file).
+5. **Metric-aware evaluation.** Stratified 5-fold CV, mean-of-seed reporting,
+   per-class and per-speed-band breakdowns, and repeated 68-file holdouts to
+   quantify test-set sampling variance.
 
 ## Validation methodology (no leakage)
 

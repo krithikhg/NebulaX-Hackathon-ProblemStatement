@@ -1,9 +1,9 @@
 """Rail corrugation subsystem — Normal / Side I / Side II.
 
 This is the **single** rail implementation: the web app (server.py) and the
-submission CLI (predict.py) both call the functions here. The model is the
-stronger LightGBM pipeline (out-of-fold macro F1 ~0.88) rather than the earlier
-random forest.
+submission CLI (predict.py) both call the functions here. The model is a
+10-seed LightGBM pipeline over the top-40 features (out-of-fold macro F1 ~0.83;
+single-file predictions use its plain argmax).
 
 Split across three modules:
   * rail_io.py        loading, tooth-toggle speed/phase, order resampling
@@ -42,6 +42,13 @@ CLASSES = ["Normal", "Side I", "Side II"]
 MODEL_PATH = os.path.join(MODEL_DIR, "rail_model.joblib")
 DEFAULT_K = 40
 SEEDS = tuple(range(10))
+
+# Fault-favouring operating point for the *batch* decision rule. argmax maximises
+# per-file accuracy, but the task is scored by macro F1 over three heavily
+# imbalanced classes, where missing a rare Side I/Side II file is costly. On the
+# 272-file training set (out-of-fold, repeated 68-file validation) flagging the
+# top-k most fault-like files at k = round(0.176 * n) maximised macro F1.
+FAULT_BUDGET_RATE = 12 / 68
 
 GBM_BASE = dict(
     n_estimators=400, learning_rate=0.03, num_leaves=15, min_child_samples=8,
@@ -94,16 +101,40 @@ def _feature_columns(df: pd.DataFrame) -> list[str]:
 
 
 # --------------------------------------------------------------- inference ----
-def predict_features(F: pd.DataFrame) -> pd.DataFrame:
-    """One row per recording; each row carries a `filename` and feature keys."""
+def _fault_budget_labels(P: np.ndarray, rate: float = FAULT_BUDGET_RATE) -> list[str]:
+    """Batch decision rule for macro F1: take the top-k most fault-like files.
+
+    ``k = round(rate * n_files)``; each selected file keeps the side with the
+    larger probability and every other file is ``Normal``.
+    """
+    labels = [CLASSES[0]] * len(P)
+    k = int(round(rate * len(P)))
+    if k <= 0:
+        return labels
+    fault = np.maximum(P[:, 1], P[:, 2])
+    for i in np.argsort(-fault)[:k]:
+        labels[i] = CLASSES[1] if P[i, 1] >= P[i, 2] else CLASSES[2]
+    return labels
+
+
+def predict_features(F: pd.DataFrame, fault_budget: bool = False) -> pd.DataFrame:
+    """One row per recording; each row carries a `filename` and feature keys.
+
+    With ``fault_budget`` the batch is scored with the macro-F1 operating point
+    (top-k fault-like files, k scaled to the batch). Use it for folder/batch
+    inference such as the submission CSV; a single recording keeps the plain
+    argmax, since a batch-ranking rule is undefined for one file.
+    """
     bundle = joblib.load(MODEL_PATH)
     sel, models = bundle["selected"], bundle["models"]
     records = F.to_dict("records")
     X = np.asarray([[r.get(c, np.nan) for c in sel] for r in records], dtype=float)
     P = np.mean([m.predict_proba(X) for m in models], axis=0)
+    labels = (_fault_budget_labels(P) if (fault_budget and len(P) > 1)
+              else [CLASSES[i] for i in P.argmax(axis=1)])
     out = pd.DataFrame({
         "file_id": F["filename"].to_numpy(),
-        "prediction": [CLASSES[i] for i in P.argmax(axis=1)],
+        "prediction": labels,
     })
     out["confidence"] = np.round(P.max(axis=1), 4)
     out["speed_m_s"] = np.round(F["_speed"].to_numpy(dtype=float), 2)
@@ -128,7 +159,7 @@ def predict_folder(folder: str) -> pd.DataFrame:
         feats = extract_features(p)
         feats["filename"] = os.path.basename(p)
         rows.append(feats)
-    return predict_features(pd.DataFrame(rows))
+    return predict_features(pd.DataFrame(rows), fault_budget=True)
 
 
 # ---------------------------------------------------------------- training ----

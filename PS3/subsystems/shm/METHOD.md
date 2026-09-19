@@ -88,224 +88,134 @@ out-of-fold training performance.
 
 ---
 
-## 4. Validation methodology
+## 4. Validation
 
-* Rainflow features are computed **per file**, with no cross-file statistics.
-* `m`, `k` **and** the Ridge weights are **refit inside every CV fold**; the
-  model that produced each held-out prediction never saw that file's label.
-* The 16 test inputs are used **only** for final inference — never for fitting,
-  feature selection, or threshold tuning.
-* Model family (analytic vs Ridge) was selected on **mean-of-seed CV**, not on a
-  single split and not on the test set.
-* The generic-ML benchmark **excludes** the physics feature so the comparison
-  is fair and not circular.
+Rainflow features are computed per file; nothing uses cross-file statistics. The
+constants and the Ridge weights are refit inside every CV fold, so no held-out
+label influences the model that predicts it, and the 16 test inputs are only
+ever used for inference. The analytic-vs-Ridge choice was made on mean-of-seed
+CV, not on one split or on the test set. The generic-ML benchmark leaves out the
+physics feature, so the comparison is not circular.
 
----
+## 5. Comparison with generic ML
 
-## 5. Model comparison / benchmarking
+On the same folds, Ridge on physics-agnostic features (time-domain stats,
+spectral centroid/spread/entropy, band powers) reaches 18.7% MAPE. Spectral
+features help it (22.4% → 18.7%), but it is far behind the physics-based models.
+Adding the rainflow pseudo-damage feature to that same linear model brings it
+under 1%. The physics feature is what matters, not the learner.
 
-To justify the physics-informed approach we benchmarked against a
-physics-agnostic ML pipeline on the same folds:
+## 6. Real-time, cumulative monitoring
 
-* **Generic features** (time-domain statistics, spectral centroid/spread/
-  entropy, band powers) with Ridge regression → **18.7% MAPE**. Spectral
-  features help here (22.4% → 18.7%).
-* **Generic features + physics pseudo-damage** → sub-1% MAPE.
+The Info Kit's complaint about manual Miner's-rule calculation is a workflow
+problem, not an arithmetic one: someone exports data periodically and runs an
+offline fatigue toolbox, so there is no live damage or remaining-life number.
+Rainflow counting is cheap (O(N)). What we add is automation and a persistent
+cumulative state.
 
-The gap is caused entirely by the rainflow pseudo-damage feature, not by the
-choice of learner: once the physics feature is present, even a simple linear
-model reaches ~0.9%. This is why the final model is physics-informed rather
-than a generic time-series ML model.
+Per-segment cost on one 581k-sample file, single core: about 0.06 s to read,
+0.25 s for rainflow and 0.14 s for the model, so roughly 0.45 s per file
+(~130 files/min). Constants are pre-fitted, files are independent, and the work
+parallelises.
 
----
-
-## 6. Real-time, cumulative monitoring (phases 1–3)
-
-### 6.0 The problem this addresses
-
-The Info Kit motivates the task as the limitations of manual Miner's-rule
-calculation — *"lacking automation, computational efficiency, and real-time
-capability"* — and describes acquisition as continuous, with data saved
-periodically as independent files. The bottleneck it describes is a **workflow**
-one: a human periodically exporting data and running an offline fatigue toolbox,
-which cannot produce a live, cumulative damage / remaining-life picture. Rainflow
-itself is not expensive (O(N)); our contribution is to automate the chain and
-turn it into a persistent, cumulative, online monitor. The three parts below map
-to phases 1–3 of the implementation.
-
-### 6.1 Per-segment throughput
-
-Measured on a single 581,119-sample file (single CPU core):
-
-| stage | time |
-|---|---|
-| read CSV | 0.06 s |
-| rainflow count (`fatpack`, k = 64) | 0.25 s |
-| pseudo-damage bank + model score | 0.14 s |
-| **total** | **~0.45 s/file (~2 files/s, ~130 files/min)** |
-
-Rainflow counting is O(N), constants are pre-fitted, and files are independent,
-so inference is a single pass with no offline fitting and can be parallelised.
-
-### 6.2 Phase 1 — cumulative state
-
-Because Miner's rule is **additive**, the cumulative damage of a monitored
-stream (a free-text label such as `Train 03 / bogie frame`) is a tiny Markov
-state that needs no history:
+Miner's rule is additive, so cumulative damage is a small state with no history:
 
 ```
-state = { D, n_segments, n_samples, rate, history }
-update(segment d of length L):  D += d ; n_segments += 1 ; n_samples += L ; rate = D / n_samples
-remaining_life = (1 - D) / rate          # segments, at the current damage rate
+D += d ; n_segments += 1 ; n_samples += L ; rate = D / n_samples
+remaining_life = (1 - D) / rate        # segments at the current damage rate
 ```
 
-* **Backend:** `state_store.update()` applies the transition and `shm_payload`
-  adds a segment to the requested stream. Endpoints: `/api/shm/state` (fleet),
-  `/api/shm/state/one`, `/api/shm/state/reset`.
-* **Frontend:** the SHM view mounts a live dashboard (`shm_stream.js`): a
-  free-text stream selector, cumulative `D`, segment/sample counts,
-  **segments to D = 1**, a `D`-over-time chart with a dashed projection to
-  `D = 1`, and a fleet table across all streams.
-* The submission CSV stays **per segment**; cumulative `D` and remaining life
-  are a monitoring overlay and never enter the scored output.
+Each uploaded segment is filed under a free-text **component** label, chosen on
+the SHM page before upload, and the state is keyed by that label. It is stored
+server-side — Cloud Storage when `PS3_STATE_BUCKET` is set, otherwise a local
+JSON file. The app shows a live dashboard from it: the component field,
+cumulative D for the selected component, counts, segments to D = 1, a
+D-over-time chart, and a table of every tracked component.
+`stream_watch.py` does the same from the command line, ingesting a folder of
+segments automatically and writing each prediction plus the running state. The
+scored CSV stays per segment; the cumulative view is a monitoring overlay.
 
-### 6.3 Phase 2 — persistence and automated ingestion
-
-* **Persistence.** State is stored server-side so totals survive restarts and
-  are shared across Cloud Run instances: **Google Cloud Storage** when
-  `PS3_STATE_BUCKET` is set (one JSON object per stream under `shm-state/`),
-  otherwise a local JSON store (`PS3/app/state/`).
-* **Automation.** `shm/stream_watch.py` watches a folder (or per-stream
-  subfolders `input/<stream>/*.csv`), ingests each new segment automatically,
-  updates the persisted cumulative state, appends to a predictions CSV, and
-  raises threshold alerts (0.25 monitor / 0.5 plan / 0.8 act). This is the
-  automated + incremental capability in one command, mirroring the app's logic.
-
-### 6.4 Phase 3 — sample-level streaming (prototype) and its accuracy
-
-For a live feed that cannot be buffered as a whole segment, `streaming.py`
-implements a true single-pass counter. It is a **faithful streaming
-reimplementation of the `fatpack` 4-point counter** — same class-centre
-convention, same peak–valley reversal filtering, same 4-point cycle-closure
-rule, and the same residue close-out (residue concatenated with itself and
-counted again). State is a bounded cycle-range histogram; memory is O(k) rather
-than O(signal length). Accuracy against `fatpack`:
-
-| counter | mean rel. diff vs batch (train / test) |
-|---|---|
-| online, **per-segment** class grid | **0.0004% / 0.0000%** |
-| online, **fixed** 64-class grid | ~2.1% / ~2.3% |
-
-The counter itself is exact, so the whole gap is the **class grid**. The
-reference labels use a grid derived from each segment's own min/max, and those
-ranges vary by ~2× across files (median 59, p10 42, p90 89). A memory-bounded
-stream cannot know a segment's min/max in advance, and no single fixed grid
-recovers it: the union range gives ~2.1% MAPE, while a typical (median) range
-clips larger segments and gives ~20%. Best-case bounded-memory streaming is
-therefore ~2.1% MAPE versus **0.55%** for the per-segment counter.
-
-We therefore **ship the exact per-segment counter** (0.45 s/segment) — already
-real-time for the periodic-file acquisition model, and exactly additive across
-segments — and document the bounded-memory streaming counter as an evaluated
-prototype with this fundamental tradeoff (`shm/ablate_stream.py`).
+We also built a sample-level streaming counter (`streaming.py`) for a feed that
+cannot be buffered as a whole segment. It reproduces `fatpack` exactly when it
+uses the same per-segment grid (0.0004% mean difference), so the counter logic
+is correct. The limitation is the grid: the labels use a grid from each
+segment's own min/max, and those ranges vary by about 2x across files. A
+bounded stream cannot know a segment's range in advance, and no fixed grid
+matches — the union range gives ~2.1% MAPE and a typical range clips larger
+segments (~20%). That is well behind the 0.55% of the per-segment counter, so
+the per-segment counter is what we ship. The streaming version is kept as an
+evaluated prototype (`ablate_stream.py`).
 
 ## 7. Why the error is not zero
 
 The label is deterministic, so an exact reproduction would be exact. The
-remaining ~0.5% is **not random label noise**:
+remaining ~0.5% is not label noise: the residual is multiplicative (the slope of
+log(D/S) against log D is about 0), where additive noise would give about -1. It
+comes from the rainflow tooling. Moving from a generic ASTM counter to `fatpack`
+with k = 64 cut the per-file D/S spread from 4.1% to 1.3% and MAPE from 2.5% to
+0.8%. What is left is the organisers' exact load-class and residue convention,
+which they do not publish.
 
-* The residual is **multiplicative** — the slope of `log(D/S)` on `log D` is
-  ≈ 0. Additive noise would produce a slope of ≈ −1. So the labels were not
-  perturbed.
-* It is dominated by the **exact rainflow implementation**: switching from a
-  generic ASTM counter to `fatpack` with `k = 64` cut the per-file `D/S` spread
-  from **4.1% to 1.3%** and the MAPE from 2.5% to 0.8%.
-* What remains is the organisers' precise load-class/residue convention, which
-  is not published.
+## 8. What we tried
 
-In short: the model reproduces the physics; the residual is tooling, not signal.
+- Rainflow variant: generic counter 2.5% → fatpack k = 64 0.8%. Biggest single gain.
+- Exponent models: a bank of exponents (0.55%) beats a single exponent (0.88%).
+  The relation is slightly curved in exponent space, but a two-slope (additive)
+  S-N model did not fit, so we treat it as a multiplicative calibration rather
+  than a bilinear curve.
+- Mean-stress (Goodman) correction: worse, dropped.
+- Fatigue-limit cutoff: no change, so the labels use a plain range^m sum.
+- Detrending each series: worse (0.8% → 1.6%).
+- Residual Ridge on generic features: 0.69%, weaker than the exponent bank, not
+  shipped.
 
----
+## 9. Assumptions
 
-## 8. Ablations and investigated alternatives
+- The S-N constants are the same for all test files. Training spans two lines
+  and two load conditions with a small D/S spread, which supports this.
+- The stress unit is not given, so it is absorbed into the scale k.
+- With 64 training and 16 test files, per-file MAPE has real variance, so we
+  rely on repeated CV rather than one split.
 
-* **Rainflow variant:** generic counter (2.5% MAPE) → `fatpack` `k = 64` (0.8%).
-  This was the largest single improvement.
-* **Flexible exponent models:** a bank of exponents improves on a single exponent
-  (0.88% → 0.55%). The effective relation is *curved* in exponent space; a
-  literal two-slope (additive) S-N model did **not** fit, so we report a
-  multiplicative calibration rather than claiming a bilinear S-N curve.
-* **Mean-stress (Goodman) correction:** made results worse → not used.
-* **Fatigue-limit cutoff:** changed nothing → labels use a plain `rangeᵐ` sum.
-* **Detrending** each series before counting: worse (0.8% → 1.6%).
-* **Residual Ridge on generic features:** weaker than the exponent-bank
-  (0.69% vs 0.55%), so it is documented, not shipped.
-
----
-
-## 9. Assumptions and limitations
-
-* We assume the same S-N constants apply to all test files (same material/
-  component). The training set spans two lines and two load conditions and the
-  per-file `D/S` spread is small, which supports this.
-* The stress unit is not stated; it is absorbed into the scale `k`, so it does
-  not affect predictions.
-* The exact organisers' rainflow tooling is unknown; we match it empirically via
-  `k = 64`.
-* With only 64 training files and 16 test files, per-file MAPE has non-trivial
-  variance; our conclusions rely on repeated cross-validation rather than a
-  single split.
-
----
-
-## 10. Reproduction
+## 10. Running it
 
 ```bash
 cd PS3/subsystems
 
-# refit both models on the provided Train set and score the provided Test set
-../../.venv/bin/python -m shm.predict --retrain     # writes shm/predictions/shm_predictions.csv
+# refit and write the submission CSV
+../../.venv/bin/python -m shm.predict --retrain
 
-# inference on a new file or directory (loads the saved models)
+# inference on a file or folder
 ../../.venv/bin/python -m shm.predict --input <dir-or-file.csv> --output <out.csv>
 
-# method comparison, figures, and the streaming-vs-batch ablation
+# comparison, figures, streaming ablation
 ../../.venv/bin/python -m shm.benchmark
 ../../.venv/bin/python -m shm.report_figs
 ../../.venv/bin/python -m shm.ablate_stream
 
-# automated, persistent, cumulative ingestion of a folder of segments
+# automatic cumulative ingestion of a folder, filed per component
 ../../.venv/bin/python -m shm.stream_watch --input ../02_Datasets/SHM/Test \
-    --stream "Train 01 / bogie frame" --once
+    --stream "bogie frame A" --once
 ```
 
-The interactive app lives in `PS3/app` (`uvicorn server:app --port 8080`); set
-`PS3_STATE_BUCKET=<bucket>` to persist cumulative state in Cloud Storage (a
-local JSON store is used otherwise).
+The app is in `PS3/app` (`uvicorn server:app --port 8080`); choose the component
+in the field at the top of the SHM page, then upload. Set `PS3_STATE_BUCKET` to
+keep cumulative state in Cloud Storage, otherwise it uses a local JSON file.
 
-**Model files:** `shm/checkpoints/constants.json` (analytic) and
-`shm/checkpoints/bank_model.joblib` (physics-informed Ridge).
-**Deliverable:** `shm/predictions/shm_predictions.csv` — columns `file_id`,
-`prediction` (one cumulative-damage value per file).
-
----
+Model files: `shm/checkpoints/constants.json` (analytic) and
+`bank_model.joblib` (physics-informed Ridge). Deliverable:
+`shm/predictions/shm_predictions.csv` (`file_id`, `prediction`).
 
 ## 11. Summary
 
-We reverse-engineer the organisers' Miner's-rule damage calculation: rainflow
-counting with 64 load classes, an S-N exponent recovered as `m = 5.00`, and a
-scale constant fitted in closed form. On top of this interpretable core we fit a
-small, regularised, cross-validated multiplicative correction over a bank of
-exponents, which is robustly more accurate (better in 150/160 nested folds).
-This keeps the solution physically transparent while reaching ~0.995 on
-cross-validation.
+We reconstruct the organisers' Miner's-rule calculation: rainflow counting with
+64 load classes, an S-N exponent that comes out at 5.00, and a scale constant
+fitted in closed form. A small regularised correction over a bank of exponents
+improves on the single-exponent fit (better in 150 of 160 nested folds), giving
+about 0.995 on cross-validation.
 
-Beyond the per-segment prediction, the solution is a **real-time monitoring
-pipeline**: each segment's damage is added to a persistent per-stream Markov
-state (Cloud Storage or a local JSON store), the app renders a live cumulative
-damage / remaining-life dashboard with a fleet view, and `stream_watch.py`
-ingests segments automatically with threshold alerts. A true sample-level
-streaming counter was prototyped and honestly evaluated, but its accuracy loss
-(≈5% vs 0.46% MAPE) means the exact batch counter remains the shipped model —
-used at segment granularity, which is real-time for the periodic-file
-acquisition model.
+Beyond the per-segment prediction, the pipeline is a cumulative monitor: each
+segment's damage is added to a persistent per-stream state, the app shows a live
+damage and remaining-life dashboard, and `stream_watch.py` ingests segments
+automatically. A sample-level streaming counter was built and tested but costs
+accuracy, so the exact per-segment counter remains the shipped model.
