@@ -16,9 +16,8 @@ import { lines } from "./charts.js";
 import { button, card, h, int, levelChip, stat, table, titled } from "./ui.js";
 
 export const DEFAULT_STREAM = "Train 01 / bogie frame";
-const BANDS = [[0.8, "act"], [0.5, "plan"], [0.25, "watch"], [0, "ok"]];
-const levelOf = (d) => (BANDS.find(([t]) => d >= t) || BANDS[3])[1];
-const STATUS = { ok: "Normal", watch: "Monitor", plan: "Plan", act: "Act now" };
+// Report-only status vocabulary, matching the app's LEVELS: failure at D = 1.
+const levelOf = (d) => (d >= 1 ? "fault" : "ok");
 
 const store = { streams: [], selected: null, listeners: new Set() };
 const notify = () => store.listeners.forEach((fn) => fn());
@@ -115,7 +114,7 @@ function build() {
           { key: "D", label: "D", num: true, fmt: (v) => v.toFixed(4) },
           { key: "n_segments", label: "Segments", num: true, fmt: int },
           { key: "life", label: "Segments to D = 1", num: true },
-          { key: "level", label: "Status", fmt: (v) => levelChip(v, STATUS[v]) },
+          { key: "level", label: "Status", fmt: (v) => levelChip(v) },
         ]))
     : null;
 

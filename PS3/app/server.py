@@ -1,4 +1,4 @@
-"""Cloud inference server + static host for the TrainWhisper web app.
+"""Cloud inference server + static host for the MAVIS web app.
 
 One process serves the frontend and runs the *same* Python pipelines that write
 the submission CSVs (door.py / acv.py / rail.py / shm.py). The browser only
@@ -32,7 +32,7 @@ import state_store
 from common import HERE
 
 PUBLIC = os.path.join(HERE, "public")
-app = FastAPI(title="TrainWhisper", docs_url=None, redoc_url=None)
+app = FastAPI(title="MAVIS", docs_url=None, redoc_url=None)
 
 
 # --------------------------------------------------------------- helpers ----

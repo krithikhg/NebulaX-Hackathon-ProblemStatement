@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TrainWhisper</title>
+  <title>MAVIS</title>
   <meta name="theme-color" content="#ffffff">
-  <meta name="description" content="Condition monitoring for Door, ACV, Rail Corrugation and SHM data.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M11 3 5 29M21 3l6 26M8.6 10h14.8M7.4 17h17.2M6.2 24h19.6' stroke='%23465fff' stroke-width='3' stroke-linecap='round' fill='none'/></svg>">
+  <meta name="description" content="MAVIS, the Maintenance Analytics &amp; Vehicle Intelligence System: condition monitoring for Door, ACV, Rail Corrugation and SHM data.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230c111d'/><path d='M8 23V9l8 8 8-8v14' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Outfit:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="js/app.js"></script>
 </head>
@@ -17,12 +17,8 @@
   <a class="skip" href="#content">Skip to content</a>
   <div class="layout">
     <aside class="side" id="side" aria-label="Navigation">
-      <a class="brand" href="#/overview" aria-label="TrainWhisper overview">
-        <svg class="brand-mark" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
-          <path d="M11 3 5 29M21 3l6 26" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/>
-          <path d="M8.6 10h14.8M7.4 17h17.2M6.2 24h19.6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity=".45" fill="none"/>
-        </svg>
-        <span class="brand-name">trainwhisper</span>
+      <a class="logo side-logo" href="#/overview" title="Maintenance Analytics &amp; Vehicle Intelligence System" aria-label="MAVIS, Maintenance Analytics &amp; Vehicle Intelligence System. Go to overview">
+        <span class="logo-text">MAVIS</span>
       </a>
       <nav class="menu" id="menu"></nav>
       <div class="side-card" id="export-card"></div>
@@ -33,6 +29,9 @@
         <button type="button" class="icon-btn menu-toggle" id="menu-toggle" aria-label="Open navigation" aria-expanded="false">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
+        <a class="logo top-logo" href="#/overview" title="Maintenance Analytics &amp; Vehicle Intelligence System" aria-label="MAVIS, Maintenance Analytics &amp; Vehicle Intelligence System. Go to overview">
+          <span class="logo-text">MAVIS</span>
+        </a>
         <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
         <div class="topbar-actions">
           <span class="local" id="local-note"></span>

@@ -1,21 +1,14 @@
-// TrainWhisper UI shell. Models run in a Web Worker (worker.js); views.js turns each payload into
+// MAVIS UI shell. Models run in a Web Worker (worker.js); views.js turns each payload into
 // page parts; this file handles routing, the side menu, uploads, the detail panel, zip and print.
 import { BENCHMARK, HEADLINES } from "./benchmark.js";
 import {
-  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, ring, saveBlob, segmented, stagger, stat, table, titled, toast,
+  $, KINDS, LEVELS, SYSTEMS, button, card, countUp, h, icon, iconButton, info, kindByKey, levelChip, now, saveBlob, segmented, stagger, stat, table, titled, toast,
 } from "./ui.js";
 import { hideTooltip, showTooltip } from "./charts.js";
 import { getSelectedStream, refreshStreams } from "./shm_stream.js";
 import { VIEWS } from "./views.js";
 import { makeZip } from "./zip.js";
 
-const SAMPLE_BASE = "https://raw.githubusercontent.com/krithikhg/NebulaX-Hackathon-ProblemStatement/main/PS3/02_Datasets/";
-const SAMPLES = {
-  door: { kind: "Door", path: "Door/Test.csv" },
-  acv: { kind: "ACV", path: "ACV/Test/acv_test_case.xlsx" },
-  rail: { kind: "Rail corrugation", path: "Rail_Corrugation/Test/Test5.csv" },
-  shm: { kind: "SHM", path: "SHM/Test/test02.csv" },
-};
 const SINGLE_FILE = new Set(["Door", "ACV"]);
 
 const content = $("#content");
@@ -55,7 +48,7 @@ function closePanel() {
 }
 
 /** Entrance order for list-like containers, and count-up for figures. */
-const STAGGERED = ".page, .tab-body, .hero-row, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .checklist, .panel-body";
+const STAGGERED = ".page, .tab-body, .tiles, .stats, .stats-2, .prio, .strip, .train, .rec-grid, .gauges, .diverge, .panel-body";
 function enhance(root) {
   stagger(root, STAGGERED);
   if (root.matches && root.matches(".tab-body")) [...root.children].forEach((c, i) => c.style.setProperty("--i", i));
@@ -120,7 +113,7 @@ const FRIENDLY_ERRORS = [
 const friendly = (msg) => (FRIENDLY_ERRORS.find(([re]) => re.test(msg)) || [null, msg])[1];
 
 let busy = false;
-/** hint: subsystem to assume when a file can't be recognised (the page the user is on, or a sample). */
+/** hint: subsystem to assume when a file can't be recognised (the page the user is on, or the tile it was dropped on). */
 async function analyse(files, hint) {
   if (busy || !files.length) return;
   busy = true;
@@ -129,11 +122,17 @@ async function analyse(files, hint) {
   try {
     const groups = new Map();
     const unknown = [];
+    let rejected = 0;
     for (const f of files) {
       const detected = await detect(f);
+      // A file uploaded for one subsystem that looks like another is flagged, never re-routed.
+      if (detected && hint && detected !== hint) {
+        notes.push(`${f.name} was not analysed: it looks like ${SYSTEMS[detected].title} data, not ${SYSTEMS[hint].title}. Upload it on the ${SYSTEMS[detected].title} tile or page.`);
+        rejected++;
+        continue;
+      }
       const kind = detected || hint;
       if (!kind) { unknown.push(f.name); continue; }
-      if (detected && hint && detected !== hint) notes.push(`${f.name} was recognised as ${SYSTEMS[detected].title} data.`);
       if (!groups.has(kind)) groups.set(kind, []);
       groups.get(kind).push(f);
     }
@@ -167,17 +166,18 @@ async function analyse(files, hint) {
       }
     }
     setStatus("");
-    // One result opens its page directly; a batch lands on the overview with a single summary.
+    if (rejected) toast([icon("act", 16), h("b", {}, "Wrong subsystem"), h("span", {}, `${rejected} file${rejected > 1 ? "s" : ""} not analysed. See the note above.`)]);
+    // Stay on the current page so several subsystems can be uploaded in a row; the toast links to the result.
     if (done.length === 1) {
       const v = viewOf(done[0]);
-      toast([levelChip(v.level), h("b", {}, SYSTEMS[done[0]].title), h("span", {}, v.headline)]);
+      const key = SYSTEMS[done[0]].key;
+      toast([levelChip(v.level), h("b", {}, SYSTEMS[done[0]].title), h("span", {}, v.headline)], route === key ? {} : { href: `#/${key}` });
     } else if (done.length > 1) {
-      const urgent = done.filter((k) => LEVELS[viewOf(k).level].rank >= 2).length;
-      toast([icon("ok", 16), h("b", {}, `${done.length} subsystems analysed`), h("span", {}, urgent ? `${urgent} need action` : "no action needed")]);
+      const faults = done.filter((k) => viewOf(k).level === "fault").length;
+      toast([icon("ok", 16), h("b", {}, `${done.length} subsystems analysed`), h("span", {}, faults ? `fault detected in ${faults}` : "no faults detected")],
+        route === "overview" ? {} : { href: "#/overview", label: "Overview" });
     }
-    if (done.length === 1) go(SYSTEMS[done[0]].key);
-    else if (done.length > 1) go("overview");
-    else render();
+    render({ keepScroll: true });
   } finally {
     busy = false;
     document.body.classList.remove("busy");
@@ -203,7 +203,7 @@ function currentRoute() {
   return ["overview", "benchmark", "help"].includes(r) || kindByKey(r) ? r : "overview";
 }
 
-function render() {
+function render({ keepScroll = false } = {}) {
   route = currentRoute();
   const kind = kindByKey(route);
   renderMenu();
@@ -212,7 +212,7 @@ function render() {
   const page = route === "overview" ? overviewPage() : route === "benchmark" ? benchmarkPage() : route === "help" ? helpPage() : systemPage(kind);
   content.replaceChildren(...[notes.length ? noticeBox() : null, page].filter(Boolean));
   enhance(content);
-  window.scrollTo(0, 0);
+  if (!keepScroll) window.scrollTo(0, 0);
 }
 
 function noticeBox() {
@@ -259,9 +259,6 @@ toggle.addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------ pages ----
-function sampleButton(key, label = "Sample") {
-  return h("button", { type: "button", class: "btn small", "data-sample": key, onclick: (e) => { e.stopPropagation(); loadSample(key); } }, icon("sample", 14), label);
-}
 function uploadButton(kind, label = "Upload") {
   return h("button", { type: "button", class: "btn small", onclick: (e) => { e.stopPropagation(); pickFiles(kind); } }, icon("upload", 14), label);
 }
@@ -283,7 +280,7 @@ function overviewPage() {
         h("a", { class: "tile-go", href: `#/${s.key}`, "aria-label": `Open ${s.title}` }, icon("arrow", 16)),
       ] : [
         h("div", { class: "tile-empty" }, icon("file", 20), h("span", {}, s.needs)),
-        h("div", { class: "tile-actions" }, uploadButton(k), sampleButton(s.key)),
+        h("div", { class: "tile-actions" }, uploadButton(k)),
       ]);
     if (e) {
       tile.tabIndex = 0;
@@ -302,48 +299,13 @@ function overviewPage() {
         levelChip(v.level),
         h("b", {}, SYSTEMS[k].title),
         h("span", { class: "prio-head" }, v.headline),
-        h("span", { class: "prio-next" }, v.actions[0]),
         icon("arrow", 16));
     }))) : null;
 
   return h("div", { class: "page", "data-state": session.size ? "done" : null },
-    heroRow(),
+    h("div", { class: "page-head" }, h("h1", {}, "Overview")),
     h("div", { class: "tiles" }, tiles),
     priority);
-}
-
-/** Overview header: welcome card, session gauge and model-score gauge. */
-function heroRow() {
-  const n = session.size;
-  const levels = KINDS.filter((k) => session.has(k)).map((k) => viewOf(k).level);
-  const count = (pred) => (n ? String(levels.filter(pred).length) : "-");
-  const score = KINDS.reduce((s, k) => s + HEADLINES[k].score, 0) / KINDS.length;
-  const foot = (items) => h("div", { class: "gauge-foot" }, items.map(([label, value]) => h("div", {}, h("span", {}, label), h("b", {}, value))));
-
-  const hero = h("section", { class: "card hero" },
-    h("div", { class: "hero-art", html: `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 3 5 29M21 3l6 26"/><path d="M8.6 10h14.8M7.4 17h17.2M6.2 24h19.6" opacity=".6"/></svg>` }),
-    h("div", { class: "hero-body" },
-      h("span", { class: "hero-kicker" }, "Train condition monitoring"),
-      h("h1", { class: "hero-title" }, "TrainWhisper"),
-      h("p", { class: "hero-text" }, "Drop telemetry anywhere on the page, or browse. Mixed subsystems are sorted automatically.")),
-    h("button", { type: "button", class: "btn primary hero-link", onclick: () => pickFiles(null) }, icon("upload", 16), "Browse files"));
-
-  const coverage = h("section", { class: "card gauge-card" },
-    h("div", { class: "gauge-top" },
-      titled("h3", "This session", "Subsystems with a result in this session. Each one adds a CSV to predictions.zip."),
-      h("p", { class: "card-sub" }, "Subsystems analysed, and their status"),
-      ring(n / 4, [h("b", {}, `${n}/4`), h("span", {}, "analysed")], { size: 240, half: true })),
-    foot([["Need action", count((l) => LEVELS[l].rank >= 2)], ["Monitor", count((l) => l === "watch")], ["Normal", count((l) => l === "ok")]]));
-
-  const model = h("section", { class: "card gauge-card" },
-    h("div", { class: "gauge-top" },
-      h("div", { class: "card-head" }, titled("h3", "Model score", "Mean out-of-sample score of the four selected models."),
-        h("a", { class: "link", href: "#/benchmark" }, "Benchmark")),
-      h("p", { class: "card-sub" }, "Validation score, mean of 4 subsystems"),
-      ring(score, [h("b", {}, score.toFixed(2)), h("span", {}, "out of 1.00")], { size: 240, half: true, color: "var(--good)" })),
-    foot(KINDS.map((k) => [SYSTEMS[k].key === "rail" ? "Rail" : SYSTEMS[k].title, HEADLINES[k].score.toFixed(2)])));
-
-  return h("div", { class: "hero-row" }, hero, coverage, model);
 }
 
 function systemPage(kind) {
@@ -363,7 +325,7 @@ function systemPage(kind) {
       h("b", {}, "No data yet"),
       h("span", {}, `${s.needs}. Drop it here or browse.`));
     addDropTarget(empty, kind);
-    return h("div", { class: "page" }, head, empty, h("div", { class: "center" }, sampleButton(s.key, "Load sample data")));
+    return h("div", { class: "page" }, head, empty);
   }
 
   const v = viewOf(kind);
@@ -375,9 +337,7 @@ function systemPage(kind) {
     if (t === "summary") {
       body.replaceChildren(
         h("div", { class: "stats" }, v.stats),
-        h("div", { class: "split" }, v.main,
-          card(titled("h3", "Actions", `When: ${LEVELS[v.level].when}.`),
-            h("ul", { class: "checklist" }, v.actions.map((a) => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, a))))))));
+        v.main);
     } else if (t === "records") body.replaceChildren(v.records);
     else body.replaceChildren(...v.signals, h("p", { class: "method" }, icon("info", 14), v.method));
     enhance(body);
@@ -417,7 +377,7 @@ function helpPage() {
         h("li", {}, "Upload on the Overview (any mix of files) or on a subsystem page."),
         h("li", {}, "Select any item in the Summary visual to open its details."),
         h("li", {}, "Download the CSV, or predictions.zip from the side menu."))),
-      card("Status", h("ul", { class: "levels" }, Object.keys(LEVELS).map((l) => h("li", {}, levelChip(l), h("span", {}, LEVELS[l].when)))))),
+      card("Status", h("ul", { class: "levels" }, Object.keys(LEVELS).map((l) => h("li", {}, levelChip(l), h("span", {}, LEVELS[l].desc)))))),
     card("Inputs", table(KINDS.map((k) => ({ s: SYSTEMS[k].title, full: SYSTEMS[k].full, needs: SYSTEMS[k].needs, csv: SYSTEMS[k].csv })), [
       { key: "s", label: "Subsystem" }, { key: "full", label: "Full name" }, { key: "needs", label: "Input" }, { key: "csv", label: "Output", fmt: (v) => h("code", {}, v) },
     ])));
@@ -454,20 +414,6 @@ window.addEventListener("drop", async (e) => {
   if (e.dataTransfer.files.length) await analyse([...e.dataTransfer.files].map((f) => ({ name: f.name, blob: f })), hint);
 });
 
-async function loadSample(key) {
-  if (busy) return;
-  const { kind, path } = SAMPLES[key];
-  const name = path.split("/").pop();
-  setStatus(`Downloading sample ${name}`);
-  try {
-    const res = await fetch(SAMPLE_BASE + path);
-    if (!res.ok) throw new Error(`Sample download failed (${res.status}).`);
-    await analyse([{ name, blob: await res.blob() }], kind);
-  } catch (err) {
-    setStatus(err.message, { error: true });
-  }
-}
-
 // ----------------------------------------------------- zip and print ----
 function downloadZip() {
   const files = KINDS.filter((k) => session.has(k)).map((k) => ({ name: viewOf(k).csv.filename, text: viewOf(k).csv.text }));
@@ -480,19 +426,18 @@ function printReport(kinds) {
   $("#print-root").replaceChildren(
     h("header", { class: "p-head" },
       h("div", {}, h("h1", {}, kinds.length === 1 ? `${SYSTEMS[kinds[0]].title} job sheet` : "Condition report"),
-        h("p", {}, `TrainWhisper · ${now()}`)),
+        h("p", {}, `MAVIS · Maintenance Analytics & Vehicle Intelligence System · ${now()}`)),
       h("div", {}, "Overall: ", levelChip(Object.keys(LEVELS).find((l) => LEVELS[l].rank === worst)))),
     ...kinds.map((k) => {
       const v = viewOf(k);
       const { files, at } = session.get(k);
       return h("section", { class: `p-sec sev-${v.level}` },
         h("div", { class: "p-sec-head" }, h("h2", {}, `${SYSTEMS[k].title} (${SYSTEMS[k].full})`), levelChip(v.level)),
-        h("p", { class: "p-meta" }, `${files.length === 1 ? files[0] : `${files.length} files`} · analysed ${at} · ${LEVELS[v.level].when}`),
+        h("p", { class: "p-meta" }, `${files.length === 1 ? files[0] : `${files.length} files`} · analysed ${at}`),
         h("p", { class: "p-headline" }, v.headline),
-        h("ul", { class: "p-check" }, v.actions.map((t) => h("li", {}, t))),
         v.print.rows.length ? [h("h3", {}, v.print.note), h("table", {}, h("thead", {}, h("tr", {}, v.print.columns.map((c) => h("th", {}, c)))),
           h("tbody", {}, v.print.rows.map((r) => h("tr", {}, r.map((c) => h("td", {}, c))))))] : h("p", {}, v.print.note),
-        h("div", { class: "p-sign" }, h("span", {}, "Actioned by: ____________________"), h("span", {}, "Date: __________"), h("span", {}, "Work order: __________")));
+        h("div", { class: "p-sign" }, h("span", {}, "Reviewed by: ____________________"), h("span", {}, "Date: __________")));
     }));
   document.body.classList.add("printing");
   const done = () => { document.body.classList.remove("printing"); window.removeEventListener("afterprint", done); };
@@ -501,5 +446,5 @@ function printReport(kinds) {
 }
 
 // ------------------------------------------------------------- start ----
-$("#local-note").replaceChildren(icon("cloud", 14), h("span", {}, "Cloud processing"), info("Files are analysed on the TrainWhisper server and are not stored after the response."));
+$("#local-note").replaceChildren(icon("cloud", 14), h("span", {}, "Cloud processing"), info("Files are analysed on the MAVIS server and are not stored after the response."));
 render();

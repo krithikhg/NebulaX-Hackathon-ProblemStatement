@@ -30,7 +30,6 @@ const PATHS = {
   download: "M12 4v12m0 0-5-5m5 5 5-5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2",
   print: "M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 8v5m0-8v.01",
-  sample: "M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21.5h11.6a2 2 0 0 0 1.7-3L14 9V3M7 15h10",
   grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   chart: "M4 20V10m6 10V4m6 16v-7m6 7H2",
   help: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.5 6.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14m0 3v.01",
@@ -51,15 +50,15 @@ export function icon(name, size = 20) {
 
 // ------------------------------------------------------ status levels ----
 // One vocabulary for every subsystem: colour + icon + word, never colour alone.
+// Statuses report only what the model found in the data; they do not prescribe urgency or actions.
 export const LEVELS = {
-  act: { label: "Act now", when: "Before the next revenue service", rank: 3 },
-  plan: { label: "Plan", when: "Next engineering hours", rank: 2 },
-  watch: { label: "Monitor", when: "Next routine inspection", rank: 1 },
-  ok: { label: "Normal", when: "No action", rank: 0 },
+  fault: { label: "Fault detected", icon: "act", desc: "The model flagged a fault in this data.", rank: 2 },
+  na: { label: "Not assessed", icon: "info", desc: "The data could not be assessed, e.g. a rail recording taken while the train was stationary.", rank: 1 },
+  ok: { label: "No fault", icon: "ok", desc: "The model flagged no fault in this data.", rank: 0 },
 };
 
 export function levelChip(level, text = LEVELS[level].label) {
-  return h("span", { class: `chip sev-${level}` }, icon(level, 13), text);
+  return h("span", { class: `chip sev-${level}` }, icon(LEVELS[level] ? LEVELS[level].icon : level, 13), text);
 }
 
 // ---------------------------------------------------------- systems ----
@@ -153,26 +152,6 @@ export function stat({ label, value, chip, caption, tip, iconName }) {
     h("div", { class: "stat-row" }, h("span", { class: "stat-value" }, value), chip || null),
     caption ? h("div", { class: "stat-caption" }, caption) : null,
     iconName ? h("span", { class: "stat-ico" }, icon(iconName, 20)) : null);
-}
-
-/**
- * Progress gauge: a full ring, or a semicircle (half: true) with the centre content at its base.
- * fraction is 0..1; centre is any node(s).
- */
-export function ring(fraction, centre, { size = 180, color = "var(--brand)", half = false } = {}) {
-  const r = 44;
-  const c = 2 * Math.PI * r;
-  const len = half ? c / 2 : c;
-  const f = Math.min(1, Math.max(0, fraction));
-  const turn = half ? "rotate(180 50 50)" : "rotate(-90 50 50)";
-  const node = h("div", { class: `ring${half ? " half" : ""}`, style: `width:${size}px` });
-  node.innerHTML = `<svg viewBox="0 0 100 ${half ? 54 : 100}" aria-hidden="true">
-    <circle class="ring-track" cx="50" cy="50" r="${r}" stroke-width="${half ? 6 : 7}" transform="${turn}" stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}"/>
-    <circle class="ring-arc" cx="50" cy="50" r="${r}" stroke-width="${half ? 6 : 7}" stroke="${color}" transform="${turn}"
-      stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}" stroke-dashoffset="${(len * (1 - f)).toFixed(2)}" style="--c:${len.toFixed(2)}"${f > 0 ? "" : ' visibility="hidden"'}/>
-  </svg>`;
-  node.append(h("div", { class: "ring-centre" }, centre));
-  return node;
 }
 
 export function legend(items) {

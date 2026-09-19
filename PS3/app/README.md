@@ -1,7 +1,9 @@
-# TrainWhisper — NebulaX PS3 (Train Condition Monitoring)
+# MAVIS — NebulaX PS3 (Train Condition Monitoring)
 
-One app, four subsystems. Drop in telemetry, get back a **localised** maintenance
-action: which door cycle, which car, which rail side, which measurement point.
+Maintenance Analytics & Vehicle Intelligence System.
+
+One app, four subsystems. Drop in telemetry, get back a **localised** finding:
+which door cycle, which car, which rail side, which measurement point.
 
 The app runs on **Google Cloud Run** as a single service: it serves the static
 frontend and runs the Python pipelines behind `/api/predict/*`. The browser only
