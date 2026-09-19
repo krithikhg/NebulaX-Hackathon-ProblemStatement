@@ -56,27 +56,6 @@ def _save(upload: UploadFile) -> str:
     return path
 
 
-def _decimate(xs, ys, buckets):
-    """Min/max per bucket (same as the old browser worker) so peaks survive."""
-    n = len(xs)
-    if n <= buckets * 2:
-        return list(zip(xs, ys))
-    size = n / buckets
-    out = []
-    for b in range(buckets):
-        a = int(b * size)
-        e = min(n, int((b + 1) * size))
-        lo = hi = a
-        for i in range(a, e):
-            if ys[i] < ys[lo]:
-                lo = i
-            if ys[i] > ys[hi]:
-                hi = i
-        for i in ([lo, hi] if lo < hi else [hi, lo]):
-            out.append((xs[i], ys[i]))
-    return out
-
-
 def _histogram(cyc: np.ndarray, bins: int = 40):
     if len(cyc) == 0:
         return []
@@ -98,34 +77,7 @@ def _excel_serial(v):
 
 # ------------------------------------------------------------- payloads ----
 def door_payload(path: str, name: str) -> dict:
-    idx, d = door.predict_with_traces(path)
-    # pandas 3 may parse at us resolution, so convert to ms explicitly rather than assume ns.
-    t_ms = d["t"].astype("datetime64[ms]").astype("int64").to_numpy()
-    current = d[door.SIGNALS["c"]].to_numpy(dtype=float)
-    closing = d["Door is closing"].to_numpy(dtype=float)
-
-    result, cycles = [], []
-    for (_, g), row in zip(d.groupby("seg", sort=True), idx.itertuples(index=False)):
-        pos = g.index.to_numpy()
-        a, b = int(pos[0]), int(pos[-1]) + 1
-        pred = row.prediction
-        result.append({
-            "start_time": str(row.start_time),
-            "end_time": str(row.end_time),
-            "prediction": pred,
-            "confidence": _num(row.confidence),
-            "mean_current_mA": _num(row.mean_current_mA),
-            "peak_current_mA": _num(row.peak_current_mA),
-        })
-        seg_idx = list(range(a, b))
-        decimated = _decimate(seg_idx, [current[i] for i in seg_idx], 150)
-        cycles.append({
-            "points": [[int(i), _num(current[i]), int(t_ms[i])] for i, _ in decimated],
-            "abnormal": pred == door.ABNORMAL,
-            "operation": "Closing" if closing[a:b].max() >= 1 else "Opening",
-            "t0": int(t_ms[a]),
-            "duration_s": float(t_ms[b - 1] - t_ms[a]) / 1000.0,
-        })
+    result, cycles = door.predict_with_traces(path)
     return {"name": name, "result": result, "cycles": cycles}
 
 

@@ -3,7 +3,7 @@ Test1.csv,Normal
 Test2.csv,Normal
 Test3.csv,Normal
 Test4.csv,Normal
-Test5.csv,Side I
+Test5.csv,Normal
 Test6.csv,Normal
 Test7.csv,Normal
 Test8.csv,Normal
@@ -12,7 +12,7 @@ Test10.csv,Side I
 Test11.csv,Normal
 Test12.csv,Normal
 Test13.csv,Side I
-Test14.csv,Normal
+Test14.csv,Side II
 Test15.csv,Normal
 Test16.csv,Normal
 Test17.csv,Normal
@@ -20,22 +20,22 @@ Test18.csv,Normal
 Test19.csv,Normal
 Test20.csv,Normal
 Test21.csv,Normal
-Test22.csv,Normal
+Test22.csv,Side II
 Test23.csv,Normal
 Test24.csv,Normal
 Test25.csv,Normal
 Test26.csv,Side II
-Test27.csv,Normal
+Test27.csv,Side I
 Test28.csv,Normal
 Test29.csv,Normal
 Test30.csv,Normal
 Test31.csv,Normal
-Test32.csv,Normal
+Test32.csv,Side I
 Test33.csv,Side I
 Test34.csv,Normal
 Test35.csv,Normal
 Test36.csv,Normal
-Test37.csv,Side II
+Test37.csv,Normal
 Test38.csv,Normal
 Test39.csv,Normal
 Test40.csv,Normal
@@ -44,7 +44,7 @@ Test42.csv,Normal
 Test43.csv,Side II
 Test44.csv,Normal
 Test45.csv,Normal
-Test46.csv,Side I
+Test46.csv,Normal
 Test47.csv,Normal
 Test48.csv,Normal
 Test49.csv,Normal

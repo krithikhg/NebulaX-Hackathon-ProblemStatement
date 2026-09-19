@@ -4,10 +4,10 @@
 /** Headline per subsystem: the selected model's out-of-sample score, in plain words. */
 export const HEADLINES = {
   Door: {
-    score: 1.0, metric: "IoU-weighted F1",
-    plain: "All held-out cycles segmented with exact boundaries and classified correctly.",
+    score: 0.952, metric: "IoU-weighted F1",
+    plain: "Held-out cycles matched with near-exact boundaries; one val cycle mislabelled.",
     scale: "1.00 = every segment matched (IoU) with the correct label",
-    validation: "Chronological hold-out on Train.csv",
+    validation: "Validation split of the labelled stream (design chosen on a separate tune split)",
   },
   ACV: {
     score: 0.979, metric: "Rank-decay score",
@@ -31,7 +31,8 @@ export const HEADLINES = {
 
 /** Every approach tried, including baselines and the ones rejected on evidence. */
 export const BENCHMARK = [
-  ["Door", "Gap segmentation + Random Forest", "Chronological holdout", "macro F1", 1.0, "selected"],
+  ["Door", "Motion-state segmentation + per-operation current template", "Validation split", "IoU-weighted F1", 0.952, "selected"],
+  ["Door", "Gap segmentation + Random Forest (previous model)", "Chronological holdout", "macro F1", 1.0, "replaced"],
   ["Door", "Gap segmentation + fixed current threshold", "Chronological holdout", "macro F1", 0.86, "baseline"],
   ["ACV", "Peer z-score: indoor temp + cooling gap", "6 labelled cases", "rank decay", 0.979, "selected"],
   ["ACV", "Cabin-temp deviation vs train median (previous model)", "6 labelled cases", "rank decay", 0.958, "replaced"],

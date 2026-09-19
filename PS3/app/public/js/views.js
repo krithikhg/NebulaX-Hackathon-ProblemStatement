@@ -69,8 +69,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
         h("div", { class: "stats-2" },
           stat({ label: "Mean current", value: `${int(r.mean_current_mA)} mA`, caption: rel !== null ? `${signed(rel * 100, 0)}% vs median normal` : null }),
           stat({ label: "Peak current", value: `${int(r.peak_current_mA)} mA` }),
-          stat({ label: "Duration", value: `${r.duration_s.toFixed(1)} s` }),
-          stat({ label: "Confidence", value: certainty(r.confidence).word, caption: `p = ${r.confidence.toFixed(3)}` })),
+          stat({ label: "Duration", value: `${r.duration_s.toFixed(1)} s` })),
         titled("h4", "Motor current", "Higher current for the same movement means the motor is working against extra resistance."),
         legend([[`Cycle ${i + 1}`, r.bad ? "sw-line-bad" : "sw-line-sel"], ["Median normal cycle, same direction", "sw-line-ref"]]),
         chartHolder((holder) => lines(holder, {
@@ -100,7 +99,6 @@ export function doorView({ name, result, cycles }, { openPanel }) {
     { key: "operation", label: "Direction", fmt: (v) => v || "-" },
     { key: "duration_s", label: "Duration (s)", num: true, fmt: (v) => v.toFixed(1) },
     { key: "prediction", label: "Status", fmt: (v) => levelChip(v === NORMAL ? "ok" : "act", v) },
-    { key: "confidence", label: "Confidence", fmt: (v) => certaintyCell(v) },
     { key: "mean_current_mA", label: "Mean current (mA)", num: true, fmt: (v) => int(v) },
   ];
   const records = filterable(rows, (r) => r.bad, cols, { maxHeight: 520, onOpen: (r) => open(r.i), rowClass: (r) => (r.bad ? "row-bad" : ""), caption: "Door cycles" });
@@ -122,7 +120,7 @@ export function doorView({ name, result, cycles }, { openPanel }) {
     tile: { value: `${bad} / ${n}`, caption: "cycles abnormal" },
     mini: h("div", { class: "mini-strip" }, rows.map((r) => h("i", { class: r.bad ? "bad" : "ok" }))),
     stats: [
-      stat({ label: "Cycles detected", value: int(n), caption: opens || closes ? `${opens} open · ${closes} close` : null, tip: "Cycles are split wherever the gap between samples exceeds 0.1 s (samples are 20 ms apart inside a cycle)." }),
+      stat({ label: "Cycles detected", value: int(n), caption: opens || closes ? `${opens} open · ${closes} close` : null, tip: "Cycles are split wherever the door motion state flips or the leaf position jumps discontinuously." }),
       stat({ label: "Abnormal resistance", value: int(bad), chip: bad ? levelChip(level, pct(bad / n)) : null }),
       stat({ label: "Mean current, abnormal", value: meanBad ? `${int(meanBad)} mA` : "-", caption: meanOk ? `normal: ${int(meanOk)} mA` : null }),
       stat({ label: "Current increase", value: effort !== null ? `${signed(effort * 100, 0)}%` : "-", caption: "abnormal vs normal" }),
@@ -135,12 +133,12 @@ export function doorView({ name, result, cycles }, { openPanel }) {
       "Re-run on a new stream after repair",
     ] : ["No action required"],
     records, signals,
-    method: "Gap-based segmentation, then a random forest on per-cycle motor current, voltage and back-EMF features.",
+    method: "Motion-state segmentation, then a per-operation median current template from normal cycles; a cycle is scored by its largest sustained excursion against the normal IQR band.",
     csv: { filename: "door_predictions.csv", text: toCsv(result, ["start_time", "end_time", "prediction"]) },
     print: {
       note: bad ? "Abnormal cycles" : `All ${n} cycles normal.`,
-      columns: ["Cycle", "Start", "Direction", "Confidence"],
-      rows: badRows.map((r) => [r.i + 1, `${day(r.t0)} ${clock(r.t0)}`, r.operation || "-", certainty(r.confidence).word]),
+      columns: ["Cycle", "Start", "Direction", "Mean current"],
+      rows: badRows.map((r) => [r.i + 1, `${day(r.t0)} ${clock(r.t0)}`, r.operation || "-", `${int(r.mean_current_mA)} mA`]),
     },
   };
 }

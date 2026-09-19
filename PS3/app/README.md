@@ -13,10 +13,10 @@ implementation of each model — the same `door.py` / `acv.py` / `rail.py` /
 
 | Subsystem | Method | Validation | Score |
 |---|---|---|---|
-| Door | Gap segmentation + Random Forest on per-cycle features | Chronological holdout, scored with the real IoU-weighted F1 | **1.000** |
-| ACV | Cabin-temperature deviation from the train median (+ low-pressure evidence) | 6 labelled cases, rank-decay metric | **0.958** |
+| Door | Motion-state segmentation + per-operation current template | Validation split of the labelled stream | **0.952** |
+| ACV | Peer z-score: indoor temperature + cooling gap | 6 labelled cases, tie-aware rank decay | **0.979** |
 | Rail | v5 features (physics + localisation + shape + cyclostationary) + top-40 LightGBM, 10-seed | Stratified 5-fold CV, selection inside folds | **0.880** |
-| SHM | Rainflow counting + fitted Miner S-N constants | Leave-one-out, 64 files | **0.975** |
+| SHM | Rainflow + physics-informed bank Ridge | 8-fold CV, 5 seeds, 64 files | **0.994** |
 
 Implied Overall Score (sum ÷ 4) ≈ **0.95**.
 
@@ -92,8 +92,8 @@ CSV columns must stay as the spec requires (`Normal` / `Abnormal resistance`,
 
 | Subsystem | Payload |
 |---|---|
-| Door | `{ name, result: [{ start_time, end_time, prediction, confidence, mean_current_mA, peak_current_mA }], cycles: [{ points: [[idx, mA, epochMs]], abnormal, operation, t0, duration_s }] }` |
-| ACV | `{ name, ranked: [{ car, score, cabin_temp_dev_C, low_pressure_dev? }], samples, train, window }` (most likely first) |
+| Door | `{ name, result: [{ start_time, end_time, prediction, mean_current_mA, peak_current_mA }], cycles: [{ points: [[idx, mA, epochMs]], abnormal, operation, t0, duration_s }] }` |
+| ACV | `{ name, ranked: [{ car, score, cabin_temp_dev_C }], samples, train, window }` (most likely first) |
 | Rail | `{ result: [{ file_id, prediction, confidence, speed_m_s }], bands: [{ file_id, speed, stationary, side1[], side2[] }], bandLabels }` |
 | SHM | `{ result: [{ file_id, prediction }], detail: [{ file_id, samples, cycles, peak_amplitude, histogram }], fit: { m, C, amplitude_cutoff, loo_mape } }` |
 
@@ -132,20 +132,25 @@ version prints an `InconsistentVersionWarning` (predictions verified unchanged o
 
 ## Method notes
 
-**Door.** The controller only logs rows *during* a cycle: 20 ms between samples
-inside a cycle, 20+ s between cycles. Splitting on a 0.1 s gap reproduced all 110
-ground-truth boundaries exactly, so segmentation needs no model and every matched
-segment scores IoU = 1.0. Classification then runs on per-cycle current, voltage
-and back-EMF features — abnormal cycles draw ~720 mA mean current against ~537 mA
-for normal ones. Validated chronologically, because the segments come from one
-continuous stream and a random split would leak neighbouring cycles.
+**Door.** The controller only logs rows *during* a cycle. Cycles are split where the
+door's motion state flips (`Door is opening`/`Door is closing`) or its leaf position
+jumps discontinuously — both read off the door's own state, and together they
+reproduce every ground-truth boundary. Each cycle's motor current is resampled onto a
+fraction-of-cycle axis and compared against a median + IQR template built from
+**normal** cycles only, separately for Open and Close (their waveforms differ). A
+cycle is scored by the area of its largest sustained excursion above a percentile of
+the normal z² distribution; thresholds are fit per operation on a tune split, and the
+IQR floor + scoring statistic are grid-searched on tune and reported on a held-out
+validation split (IoU-weighted F1 0.952).
 
-**ACV.** The train is its own control group: each car's cabin temperature is
-compared with the median across cars at every timestamp, so ambient conditions and
-setpoint changes cancel out. The loader reads each file's own headers, which is
-necessary — one training workbook carries 59 parameters per car (including
-refrigeration pressures) while the rest carry 8. Car IDs are matched on `Car NN`
-so the `Car model` column is never mistaken for a car.
+**ACV.** The train is its own control group: every car in a file shares the weather,
+schedule and setpoint, so the other seven cars are the control for each one. Two
+per-car indicators are turned into leave-one-out robust z-scores against the peers
+and averaged — mean indoor temperature (`hot`, higher = worse) and the
+indoor-vs-cooling-setpoint gap while the car is in a cooling mode (`gap`). Literal 0
+readings in the temperature/setpoint columns are treated as missing (a dropout
+glitch). The `Invalid` count, majority-mode agreement, outdoor temperature and case
+04's extra telemetry were all tested and eliminated. Nothing is fitted to labels.
 
 **Rail corrugation.** The `Rotating speed` column is a raw 90-tooth toggle, so
 speed is derived from rising-edge intervals and used two ways: to resample signals
@@ -164,19 +169,20 @@ mirror/TTA, hierarchical models, curve/coherence proxies, order-domain phase
 features, and 1D/2D CNNs.
 
 **SHM.** The labels were generated by rainflow counting plus Miner's rule, so the
-model inverts that: `D = (1/C)·Σ nᵢ·σₐᵢᵐ`, with m grid-searched and C fitted in
-closed form. The fit lands on m = 5.0, a textbook S-N exponent for welded steel —
-good evidence the real generating process was recovered. Two parameters against 64
-labels, confirmed by leave-one-out.
+model is built on that chain: `D = k·Σ nᵢ·rangeᵢᵐ`. Two models share the rainflow
+features — an analytic single `(m, k)` pair (m = 5.0, a textbook welded-steel S-N
+exponent) and a physics-informed Ridge over an exponent bank that learns the S-N
+curve shape. The bank Ridge is shipped; 8-fold CV (5 seeds) gives **0.994**
+(0.55% MAPE) versus 0.991 for the analytic fit.
 
 ## Known gaps / next steps
 
 - Rail Side I remains the weak class (F1 ≈ 0.79) and the high-speed (>60 km/h)
   band is intrinsically hard; more Side I examples are the limiting factor.
-- ACV pressure evidence is implemented but made no difference on the one case that
-  carries it — worth revisiting if the held-out file has richer telemetry.
+- ACV uses only two indicators; case 04's richer telemetry (pressures) was tested and
+  did not help, but may matter if the held-out file carries it and the fault is subtle.
 - The confirm / false-alarm feedback loop is designed but not wired to storage.
-- Door segmentation assumes the held-out stream is built like the published one.
-  Verify the 20 ms / 0.1 s structure on the real test input before trusting it.
+- Door segmentation assumes the held-out stream is structured like the published one
+  (motion-state flips / position jumps). Verify on the real test input before trusting it.
 - Uploads are processed in memory/temp files and deleted after each response;
   nothing is persisted server-side.
